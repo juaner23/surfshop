@@ -10,6 +10,9 @@ require('./models/Producto');
 require('./models/Consulta');
 require('./models/ComercioInfo');
 
+const categoriaRoutes = require('./routes/categoriaRoutes');
+const { notFound, errorHandler } = require('./middleware/errorMiddleware');
+
 // 1. Inicializar la app de Express
 const app = express();
 
@@ -25,7 +28,14 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Servidor del Surf Shop funcionando' });
 });
 
-// 5. Iniciar servidor
+// 5. Rutas de la API
+app.use('/api/categorias', categoriaRoutes);
+
+// 6. Middlewares de error (siempre al final, después de todas las rutas)
+app.use(notFound);
+app.use(errorHandler);
+
+// 7. Iniciar servidor
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);

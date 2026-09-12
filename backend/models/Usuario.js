@@ -5,9 +5,8 @@ const usuarioSchema = new mongoose.Schema({
   apellido: { type: String, required: true, trim: true },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
   telefono: { type: String, required: true },
-  password: { type: String, required: true },
-  resetPasswordToken: { type: String }, // Para la recuperación de contraseña
-  resetPasswordExpire: { type: Date }
+  passwordHash: { type: String, required: true }, // nunca se guarda la contraseña en texto plano
+  rol: { type: String, enum: ['administrador'], default: 'administrador' }
 }, {
   timestamps: true // Agregafecha de creación y actualización
 });
