@@ -1,5 +1,5 @@
 const Categoria = require('../models/Categoria');
-const Producto = require('../models/Producto');
+const Publicacion = require('../models/Publicacion');
 
 // @desc    Listar todas las categorías
 // @route   GET /api/categorias
@@ -27,9 +27,9 @@ const getCategoriaById = async (req, res) => {
 // @route   POST /api/categorias
 // @access  Privado/Admin (todavía sin proteger, lo sumamos en el paso 4)
 const crearCategoria = async (req, res) => {
-  const { nombre, descripcion } = req.body;
+  const { nombre, descripcion, tipo, activo } = req.body;
 
-  const categoria = await Categoria.create({ nombre, descripcion });
+  const categoria = await Categoria.create({ nombre, descripcion, tipo, activo });
   res.status(201).json(categoria);
 };
 
@@ -46,6 +46,8 @@ const actualizarCategoria = async (req, res) => {
 
   categoria.nombre = req.body.nombre ?? categoria.nombre;
   categoria.descripcion = req.body.descripcion ?? categoria.descripcion;
+  categoria.tipo = req.body.tipo ?? categoria.tipo;
+  categoria.activo = req.body.activo ?? categoria.activo;
 
   const categoriaActualizada = await categoria.save();
   res.json(categoriaActualizada);
@@ -62,9 +64,9 @@ const eliminarCategoria = async (req, res) => {
     throw new Error('Categoría no encontrada');
   }
 
-  // Regla de integridad: si hay productos usando esta categoría, no la dejamos borrar
-  // (si no, esos productos quedarían con una referencia "colgada" a una categoría inexistente).
-  const productosAsociados = await Producto.countDocuments({ categoria: categoria._id });
+  // Regla de integridad: si hay publicaciones usando esta categoría, no la dejamos borrar
+  // (si no, esas publicaciones quedarían con una referencia "colgada" a una categoría inexistente).
+  const productosAsociados = await Publicacion.countDocuments({ categoriaId: categoria._id });
   if (productosAsociados > 0) {
     res.status(400);
     throw new Error(

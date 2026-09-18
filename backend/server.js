@@ -6,9 +6,11 @@ const connectDB = require('./config/db');
 
 require('./models/Usuario');
 require('./models/Categoria');
-require('./models/Producto');
+require('./models/Publicacion');
 require('./models/Consulta');
 require('./models/ComercioInfo');
+require('./models/ResetToken');
+require('./models/TokenInvalidado');
 
 const categoriaRoutes = require('./routes/categoriaRoutes');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');

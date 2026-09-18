@@ -38,7 +38,7 @@ const errorHandler = (err, req, res, next) => {
 
   res.status(statusCode).json({
     message,
-    // El stack trace solo se manda en desarrollo, nunca en producción (no queremos exponer rutas del server).
+
     stack: process.env.NODE_ENV === 'production' ? undefined : err.stack,
   });
 };

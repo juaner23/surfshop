@@ -2,7 +2,9 @@ const mongoose = require('mongoose');
 
 const categoriaSchema = new mongoose.Schema({
   nombre: { type: String, required: true, unique: true, trim: true },
-  descripcion: { type: String, trim: true }
+  descripcion: { type: String, trim: true },
+  tipo: { type: String, enum: ['producto', 'servicio'], required: true },
+  activo: { type: Boolean, default: true }
 }, {
   timestamps: true
 });
