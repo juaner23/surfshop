@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const TokenInvalidado = require('../models/TokenInvalidado');
 const Usuario = require('../models/Usuario');
 const { validarPassword } = require('../utils/validarPassword');
 
@@ -114,4 +115,33 @@ const login = async (req, res) => {
   });
 };
 
-module.exports = { registro , login};
+// @desc    Ver los datos del administrador logueado
+// @route   GET /api/auth/me
+// @access  Privado (requiere token)
+const perfil = async (req, res) => {
+  const u = req.usuario;
+  res.json({
+    _id: u._id,
+    nombre: u.nombre,
+    apellido: u.apellido,
+    email: u.email,
+    telefono: u.telefono,
+    rol: u.rol,
+  });
+};
+
+// @desc    Cerrar sesión (el token queda invalidado)
+// @route   POST /api/auth/logout
+// @access  Privado (requiere token)
+const logout = async (req, res) => {
+  await TokenInvalidado.create({
+    usuarioId: req.usuario._id,
+    token: req.token,
+    expiraEn: new Date(req.tokenExp * 1000), // el mismo momento en que el token iba a vencer solo
+  });
+  res.json({ mensaje: 'Sesión cerrada correctamente' });
+};
+
+
+
+module.exports = { registro, login, perfil, logout };
