@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const TokenInvalidado = require('../models/TokenInvalidado');
+const { enviarMailRestablecer } = require('../utils/recuperacion');
 const Usuario = require('../models/Usuario');
 const { validarPassword } = require('../utils/validarPassword');
 
@@ -200,5 +201,33 @@ const actualizarPerfil = async (req, res) => {
   });
 };
 
+// @desc    Pedir el mail para restablecer la contraseña
+// @route   POST /api/auth/forgot-password
+// @access  Público
+const forgotPassword = async (req, res) => {
+  const { email } = req.body;
 
-module.exports = { registro, login, perfil, logout, actualizarPerfil };
+  if (typeof email !== 'string' || !REGEX_EMAIL.test(email.trim())) {
+    res.status(400);
+    throw new Error('Ingresá un email válido');
+  }
+
+  const usuario = await Usuario.findOne({ email: email.trim().toLowerCase() });
+
+  if (usuario) {
+    try {
+      await enviarMailRestablecer(usuario, 'solicitud');
+    } catch (error) {
+      // Si el mail falla lo vemos acá, pero la respuesta al cliente no cambia
+      console.error('No se pudo enviar el mail de recuperación:', error.message);
+    }
+  }
+
+  // Misma respuesta exista o no el email, para no revelar qué emails están registrados
+  res.json({
+    mensaje: 'Si el email está registrado, te enviamos un mail con las instrucciones para restablecer la contraseña',
+  });
+};
+
+
+module.exports = { registro, login, perfil, logout, actualizarPerfil, forgotPassword };
