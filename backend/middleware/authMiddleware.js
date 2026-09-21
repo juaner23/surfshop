@@ -42,4 +42,14 @@ const protect = async (req, res, next) => {
   next();
 };
 
-module.exports = { protect };
+// Deja pasar solo a quien tiene rol de administrador.
+// Va SIEMPRE después de protect (protect es quien carga req.usuario).
+const soloAdmin = (req, res, next) => {
+  if (!req.usuario || req.usuario.rol !== 'administrador') {
+    res.status(403);
+    throw new Error('Acceso denegado: se requiere rol de administrador');
+  }
+  next();
+};
+
+module.exports = { protect, soloAdmin };

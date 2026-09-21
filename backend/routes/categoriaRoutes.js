@@ -7,10 +7,15 @@ const {
   actualizarCategoria,
   eliminarCategoria,
 } = require('../controllers/categoriaController');
+const { protect, soloAdmin } = require('../middleware/authMiddleware');
 
-// router.route(path) permite encadenar los distintos métodos HTTP para la misma URL.
-router.route('/').get(getCategorias).post(crearCategoria);
+// Leer es público (lo usa el sitio). Crear, editar y borrar: solo el administrador.
+router.route('/').get(getCategorias).post(protect, soloAdmin, crearCategoria);
 
-router.route('/:id').get(getCategoriaById).put(actualizarCategoria).delete(eliminarCategoria);
+router
+  .route('/:id')
+  .get(getCategoriaById)
+  .put(protect, soloAdmin, actualizarCategoria)
+  .delete(protect, soloAdmin, eliminarCategoria);
 
 module.exports = router;
