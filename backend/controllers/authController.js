@@ -1,4 +1,5 @@
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const Usuario = require('../models/Usuario');
 const { validarPassword } = require('../utils/validarPassword');
 
@@ -70,4 +71,47 @@ const registro = async (req, res) => {
   });
 };
 
-module.exports = { registro };
+// @desc    Iniciar sesión
+// @route   POST /api/auth/login
+// @access  Público
+const login = async (req, res) => {
+  const { email, password } = req.body;
+
+  // 1. Llegan los dos datos y son texto
+  if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
+    res.status(400);
+    throw new Error('Email y contraseña son obligatorios');
+  }
+
+  // 2. Buscar al usuario (el hash hay que pedirlo a propósito, porque el modelo lo oculta)
+  const usuario = await Usuario.findOne({ email: email.trim().toLowerCase() }).select('+passwordHash');
+
+  // 3. Mismo mensaje si el email no existe o la contraseña está mal,
+  // así nadie puede averiguar qué emails están registrados
+  const passwordOk = usuario ? await bcrypt.compare(password, usuario.passwordHash) : false;
+  if (!usuario || !passwordOk) {
+    res.status(401);
+    throw new Error('Credenciales inválidas');
+  }
+
+  // 4. Generar el token (vale 8 horas)
+  const token = jwt.sign(
+    { id: usuario._id, rol: usuario.rol },
+    process.env.JWT_SECRET,
+    { expiresIn: '8h' }
+  );
+
+  res.json({
+    token,
+    usuario: {
+      _id: usuario._id,
+      nombre: usuario.nombre,
+      apellido: usuario.apellido,
+      email: usuario.email,
+      telefono: usuario.telefono,
+      rol: usuario.rol,
+    },
+  });
+};
+
+module.exports = { registro , login};
