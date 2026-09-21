@@ -13,6 +13,7 @@ require('./models/ResetToken');
 require('./models/TokenInvalidado');
 
 const categoriaRoutes = require('./routes/categoriaRoutes');
+const publicacionRoutes = require('./routes/publicacionRoutes');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 
 // 1. Inicializar la app de Express
@@ -32,6 +33,7 @@ app.get('/api/health', (req, res) => {
 
 // 5. Rutas de la API
 app.use('/api/categorias', categoriaRoutes);
+app.use('/api/publicaciones', publicacionRoutes);
 
 // 6. Middlewares de error (siempre al final, después de todas las rutas)
 app.use(notFound);

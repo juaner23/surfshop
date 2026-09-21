@@ -17,13 +17,12 @@ const publicacionSchema = new mongoose.Schema({
   nivel: {
     type: String,
     enum: NIVELES,
-    // solo tiene sentido si es una clase; para el resto de los tipos queda sin definir
-    validate: {
-      validator: function (valor) {
-        return this.tipo === 'clase' ? !!valor : true;
-      },
-      message: 'nivel es obligatorio cuando tipo = "clase"'
-    }
+    // required condicional: Mongoose sí ejecuta esta función aunque el campo venga vacío
+    // (a diferencia de "validate", que Mongoose ni siquiera llama si el valor es undefined).
+    required: [
+      function () { return this.tipo === 'clase'; },
+      'nivel es obligatorio cuando tipo = "clase"'
+    ]
   },
   precio: { type: Number, default: 0 },
   unidadPrecio: { type: String, enum: UNIDADES_PRECIO, default: 'unidad' },
