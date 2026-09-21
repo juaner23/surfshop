@@ -143,5 +143,62 @@ const logout = async (req, res) => {
 };
 
 
+// @desc    Modificar los datos personales del administrador logueado
+// @route   PUT /api/auth/me
+// @access  Privado (requiere token)
+const actualizarPerfil = async (req, res) => {
+  // Solo estos campos se pueden modificar (así nadie se cambia el rol ni el hash)
+  const permitidos = ['nombre', 'apellido', 'email', 'telefono'];
+  const cambios = {};
 
-module.exports = { registro, login, perfil, logout };
+  for (const campo of permitidos) {
+    if (req.body[campo] === undefined) continue; // no lo mandó: no se toca
+    const valor = req.body[campo];
+    if (typeof valor !== 'string' || valor.trim() === '') {
+      res.status(400);
+      throw new Error(`El campo ${campo} no puede estar vacío`);
+    }
+    cambios[campo] = valor.trim();
+  }
+
+  if (Object.keys(cambios).length === 0) {
+    res.status(400);
+    throw new Error('No se envió ningún dato para modificar');
+  }
+
+  if (cambios.email !== undefined) {
+    cambios.email = cambios.email.toLowerCase();
+    if (!REGEX_EMAIL.test(cambios.email)) {
+      res.status(400);
+      throw new Error('El email no tiene un formato válido');
+    }
+    // El email no puede pertenecer a OTRO usuario (el propio no cuenta)
+    const otro = await Usuario.findOne({ email: cambios.email, _id: { $ne: req.usuario._id } });
+    if (otro) {
+      res.status(409);
+      throw new Error('Ya existe otro usuario registrado con ese email');
+    }
+  }
+
+  if (cambios.telefono !== undefined && !REGEX_TELEFONO.test(cambios.telefono)) {
+    res.status(400);
+    throw new Error('El teléfono no es válido (entre 8 y 20 caracteres: números, +, espacios, guiones o paréntesis)');
+  }
+
+  const usuario = await Usuario.findByIdAndUpdate(req.usuario._id, cambios, {
+    new: true,
+    runValidators: true,
+  });
+
+  res.json({
+    _id: usuario._id,
+    nombre: usuario.nombre,
+    apellido: usuario.apellido,
+    email: usuario.email,
+    telefono: usuario.telefono,
+    rol: usuario.rol,
+  });
+};
+
+
+module.exports = { registro, login, perfil, logout, actualizarPerfil };
