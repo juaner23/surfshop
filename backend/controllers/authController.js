@@ -8,6 +8,8 @@ const ResetToken = require('../models/ResetToken');
 
 const REGEX_EMAIL = /^\S+@\S+\.\S+$/;
 const REGEX_TELEFONO = /^\+?[\d\s()-]{8,20}$/;
+const MAX_INTENTOS = 3;
+const MINUTOS_BLOQUEO = 15;
 
 // @desc    Registrar un administrador
 // @route   POST /api/auth/registro
@@ -74,30 +76,69 @@ const registro = async (req, res) => {
   });
 };
 
-// @desc    Iniciar sesión
+// @desc    Iniciar sesión (con bloqueo a los 3 intentos fallidos)
 // @route   POST /api/auth/login
 // @access  Público
 const login = async (req, res) => {
   const { email, password } = req.body;
 
-  // 1. Llegan los dos datos y son texto
   if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
     res.status(400);
     throw new Error('Email y contraseña son obligatorios');
   }
 
-  // 2. Buscar al usuario (el hash hay que pedirlo a propósito, porque el modelo lo oculta)
   const usuario = await Usuario.findOne({ email: email.trim().toLowerCase() }).select('+passwordHash');
 
-  // 3. Mismo mensaje si el email no existe o la contraseña está mal,
-  // así nadie puede averiguar qué emails están registrados
+  // 1. Cuenta bloqueada: se rechaza SIN mirar la contraseña (aunque sea la correcta)
+  if (usuario && usuario.estaBloqueado()) {
+    const minutos = Math.ceil((usuario.bloqueadoHasta - Date.now()) / 60000);
+    res.status(423);
+    throw new Error(
+      `La cuenta está bloqueada por intentos fallidos. Probá de nuevo en ${minutos} minuto(s) o restablecé tu contraseña desde el mail que te enviamos`
+    );
+  }
+
+  // 2. Comprobar la contraseña
   const passwordOk = usuario ? await bcrypt.compare(password, usuario.passwordHash) : false;
+
   if (!usuario || !passwordOk) {
+    if (usuario) {
+      // Suma 1 al contador (la suma la hace la base, en un solo paso)
+      const actualizado = await Usuario.findByIdAndUpdate(
+        usuario._id,
+        { $inc: { intentosFallidos: 1 } },
+        { new: true }
+      );
+
+      if (actualizado.intentosFallidos >= MAX_INTENTOS) {
+        await Usuario.findByIdAndUpdate(usuario._id, {
+          intentosFallidos: 0,
+          bloqueadoHasta: new Date(Date.now() + MINUTOS_BLOQUEO * 60 * 1000),
+        });
+
+        try {
+          await enviarMailRestablecer(usuario, 'bloqueo');
+        } catch (error) {
+          console.error('No se pudo enviar el mail de bloqueo:', error.message);
+        }
+
+        res.status(423);
+        throw new Error(
+          `Demasiados intentos fallidos. La cuenta quedó bloqueada ${MINUTOS_BLOQUEO} minutos y te enviamos un mail para restablecer la contraseña`
+        );
+      }
+    }
+
+    // Mismo mensaje si el email no existe o la contraseña está mal
     res.status(401);
     throw new Error('Credenciales inválidas');
   }
 
-  // 4. Generar el token (vale 8 horas)
+  // 3. Login correcto: el contador vuelve a cero
+  if (usuario.intentosFallidos > 0 || usuario.bloqueadoHasta) {
+    await Usuario.findByIdAndUpdate(usuario._id, { intentosFallidos: 0, bloqueadoHasta: null });
+  }
+
   const token = jwt.sign(
     { id: usuario._id, rol: usuario.rol },
     process.env.JWT_SECRET,
@@ -116,7 +157,6 @@ const login = async (req, res) => {
     },
   });
 };
-
 // @desc    Ver los datos del administrador logueado
 // @route   GET /api/auth/me
 // @access  Privado (requiere token)
