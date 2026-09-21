@@ -1,9 +1,10 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const TokenInvalidado = require('../models/TokenInvalidado');
-const { enviarMailRestablecer } = require('../utils/recuperacion');
 const Usuario = require('../models/Usuario');
 const { validarPassword } = require('../utils/validarPassword');
+const { enviarMailRestablecer, hashToken } = require('../utils/recuperacion');
+const ResetToken = require('../models/ResetToken');
 
 const REGEX_EMAIL = /^\S+@\S+\.\S+$/;
 const REGEX_TELEFONO = /^\+?[\d\s()-]{8,20}$/;
@@ -229,5 +230,50 @@ const forgotPassword = async (req, res) => {
   });
 };
 
+// @desc    Cambiar la contraseña usando el código que llegó por mail
+// @route   PUT /api/auth/reset-password/:token
+// @access  Público (el código del mail es la autorización)
+const resetPassword = async (req, res) => {
+  const { token } = req.params;
+  const { password } = req.body;
 
-module.exports = { registro, login, perfil, logout, actualizarPerfil, forgotPassword };
+  if (typeof password !== 'string' || password.length === 0) {
+    res.status(400);
+    throw new Error('La contraseña es obligatoria');
+  }
+
+  const errores = validarPassword(password);
+  if (errores.length > 0) {
+    res.status(400);
+    throw new Error(`La contraseña ${errores.join(', ')}`);
+  }
+
+  // En la base está el hash del código, así que buscamos por el hash del que llegó
+  const registro = await ResetToken.findOne({
+    token: hashToken(token),
+    expiraEn: { $gt: new Date() }, // que no haya vencido
+  });
+  if (!registro) {
+    res.status(400);
+    throw new Error('El link es inválido o venció. Pedí uno nuevo');
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  const usuario = await Usuario.findByIdAndUpdate(registro.usuarioId, {
+    passwordHash,
+    intentosFallidos: 0, // también desbloquea la cuenta si estaba bloqueada
+    bloqueadoHasta: null,
+  });
+  if (!usuario) {
+    res.status(400);
+    throw new Error('El link es inválido o venció. Pedí uno nuevo');
+  }
+
+  // El código se usa una sola vez
+  await ResetToken.deleteMany({ usuarioId: registro.usuarioId });
+
+  res.json({ mensaje: 'Contraseña actualizada. Ya podés iniciar sesión con la nueva' });
+};
+
+
+module.exports = { registro, login, perfil, logout, actualizarPerfil, forgotPassword, resetPassword };
