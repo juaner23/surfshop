@@ -7,11 +7,16 @@ const {
   actualizarEstadoConsulta,
   eliminarConsulta,
 } = require('../controllers/consultaControllers');
+const { protect, soloAdmin } = require('../middleware/authMiddleware');
 
-router.route('/').get(getConsultas).post(crearConsulta);
+// El formulario de contacto es lo único público. Todo lo demás: solo el administrador.
+router.route('/').get(protect, soloAdmin, getConsultas).post(crearConsulta);
 
-router.route('/:id').get(getConsultaById).delete(eliminarConsulta);
+router
+  .route('/:id')
+  .get(protect, soloAdmin, getConsultaById)
+  .delete(protect, soloAdmin, eliminarConsulta);
 
-router.route('/:id/estado').patch(actualizarEstadoConsulta);
+router.route('/:id/estado').patch(protect, soloAdmin, actualizarEstadoConsulta);
 
 module.exports = router;

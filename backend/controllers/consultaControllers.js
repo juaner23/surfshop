@@ -20,7 +20,7 @@ const crearConsulta = async (req, res) => {
 
 // @desc    Listar todas las consultas (admite ?estado=pendiente para filtrar)
 // @route   GET /api/consultas
-// @access  Privado/Admin (todavía sin proteger, lo sumamos en el paso 4)
+// @access  Privado/Admin
 const getConsultas = async (req, res) => {
   const filtro = {};
   if (req.query.estado) filtro.estado = req.query.estado;
