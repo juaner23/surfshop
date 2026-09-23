@@ -36,10 +36,27 @@ const errorHandler = (err, req, res, next) => {
     message = Object.values(err.errors).map((val) => val.message).join('. ');
   }
 
+  // Siempre queda registrado en la consola del servidor, aunque al cliente le mandemos un mensaje genérico.
+  // Así el admin/desarrollador puede ver el detalle real sin exponerlo afuera.
+  if (statusCode >= 500) {
+    console.error(err);
+  }
+
+  // Un 500 significa que fue un error no esperado (bug, caída de la base, etc.).
+  // No mandamos err.message al cliente porque puede filtrar detalles internos
+  // (rutas de archivos, mensajes de MongoDB, nombres de variables, etc.).
+  if (statusCode >= 500) {
+    message = 'Ocurrió un error interno del servidor';
+  }
+
+  // El stack solo se manda si estamos EXPLÍCITAMENTE en desarrollo.
+  // (antes se ocultaba solo si NODE_ENV === 'production'; si esa variable no estaba
+  // seteada en el .env, el stack se filtraba igual. Así queda seguro por defecto.)
+  const mostrarStack = process.env.NODE_ENV === 'development';
+
   res.status(statusCode).json({
     message,
-
-    stack: process.env.NODE_ENV === 'production' ? undefined : err.stack,
+    ...(mostrarStack && { stack: err.stack }),
   });
 };
 

@@ -4,6 +4,7 @@ const TIPOS_PUBLICACION = ['alquiler_tabla', 'alquiler_ropa', 'alquiler_equipo',
 const NIVELES = ['principiante', 'intermedio', 'profesional'];
 const UNIDADES_PRECIO = ['dia', 'clase', 'unidad'];
 const ESTADOS = ['disponible', 'no_disponible'];
+const REGEX_URL = /^https?:\/\/.+/i;
 
 const publicacionSchema = new mongoose.Schema({
   nombre: { type: String, required: true, trim: true },
@@ -24,10 +25,19 @@ const publicacionSchema = new mongoose.Schema({
       'nivel es obligatorio cuando tipo = "clase"'
     ]
   },
-  precio: { type: Number, default: 0 },
+  precio: {
+    type: Number,
+    default: 0,
+    min: [0, 'El precio no puede ser negativo']
+  },
   unidadPrecio: { type: String, enum: UNIDADES_PRECIO, default: 'unidad' },
   imagenes: {
-    type: [{ type: String, required: true }],
+    type: [{
+      type: String,
+      required: true,
+      trim: true,
+      match: [REGEX_URL, 'Cada imagen debe ser una URL válida (http:// o https://)']
+    }],
     validate: {
       validator: (arr) => arr.length > 0,
       message: 'La publicación necesita al menos una imagen'

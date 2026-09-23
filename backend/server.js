@@ -16,6 +16,7 @@ const categoriaRoutes = require('./routes/categoriaRoutes');
 const consultaRoutes = require('./routes/ConsultaRoutes');
 const publicacionRoutes = require('./routes/publicacionRoutes');
 const authRoutes = require('./routes/authRoutes');
+const comercioRoutes = require('./routes/comercioRoutes');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 
 // 1. Inicializar la app de Express
@@ -38,6 +39,7 @@ app.use('/api/categorias', categoriaRoutes);
 app.use('/api/consultas', consultaRoutes);
 app.use('/api/publicaciones', publicacionRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/comercio', comercioRoutes);
 // 6. Middlewares de error (siempre al final, después de todas las rutas)
 app.use(notFound);
 app.use(errorHandler);
