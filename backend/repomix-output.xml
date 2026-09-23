@@ -1,0 +1,1291 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+config/
+  db.js
+controllers/
+  authController.js
+  categoriaController.js
+  consultaControllers.js
+  publicacionController.js
+middleware/
+  authMiddleware.js
+  errorMiddleware.js
+models/
+  Categoria.js
+  ComercioInfo.js
+  Consulta.js
+  Publicacion.js
+  ResetToken.js
+  TokenInvalidado.js
+  Usuario.js
+routes/
+  authRoutes.js
+  categoriaRoutes.js
+  ConsultaRoutes.js
+  publicacionRoutes.js
+utils/
+  enviarMail.js
+  recuperacion.js
+  validarPassword.js
+.env.ejemplo
+package.json
+server.js
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="config/db.js">
+const mongoose = require('mongoose');
+
+const connectDB = async () => {
+  try {
+    const conn = await mongoose.connect(process.env.MONGO_URI);
+    console.log(`MongoDB conectado exitosamente: ${conn.connection.host}`);
+  } catch (error) {
+    console.error(`Error al conectar a MongoDB: ${error.message}`);
+    process.exit(1); 
+  }
+};
+
+module.exports = connectDB;
+</file>
+
+<file path="controllers/authController.js">
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const TokenInvalidado = require('../models/TokenInvalidado');
+const Usuario = require('../models/Usuario');
+const { validarPassword } = require('../utils/validarPassword');
+const { enviarMailRestablecer, hashToken } = require('../utils/recuperacion');
+const ResetToken = require('../models/ResetToken');
+
+const REGEX_EMAIL = /^\S+@\S+\.\S+$/;
+const REGEX_TELEFONO = /^\+?[\d\s()-]{8,20}$/;
+const MAX_INTENTOS = 3;
+const MINUTOS_BLOQUEO = 15;
+
+// @desc    Registrar un administrador
+// @route   POST /api/auth/registro
+// @access  Público, pero exige el código de administrador (CODIGO_ADMIN del .env)
+const registro = async (req, res) => {
+  const { nombre, apellido, email, telefono, password, codigoAdmin } = req.body;
+
+  // 1. Todos los campos tienen que llegar y ser texto
+  // (chequear que sea texto evita que manden objetos raros en lugar del email)
+  const campos = { nombre, apellido, email, telefono, password, codigoAdmin };
+  for (const [clave, valor] of Object.entries(campos)) {
+    if (typeof valor !== 'string' || valor.trim() === '') {
+      res.status(400);
+      throw new Error(`El campo ${clave} es obligatorio`);
+    }
+  }
+
+  // 2. Código de administrador
+  if (!process.env.CODIGO_ADMIN) {
+    res.status(500);
+    throw new Error('Falta configurar CODIGO_ADMIN en el servidor');
+  }
+  if (codigoAdmin !== process.env.CODIGO_ADMIN) {
+    res.status(403);
+    throw new Error('Código de administrador incorrecto');
+  }
+
+  // 3. Formato de email y teléfono
+  if (!REGEX_EMAIL.test(email.trim())) {
+    res.status(400);
+    throw new Error('El email no tiene un formato válido');
+  }
+  if (!REGEX_TELEFONO.test(telefono.trim())) {
+    res.status(400);
+    throw new Error('El teléfono no es válido (entre 8 y 20 caracteres: números, +, espacios, guiones o paréntesis)');
+  }
+
+  // 4. Política de contraseña
+  const erroresPassword = validarPassword(password);
+  if (erroresPassword.length > 0) {
+    res.status(400);
+    throw new Error(`La contraseña ${erroresPassword.join(', ')}`);
+  }
+
+  // 5. Email no duplicado
+  const existe = await Usuario.findOne({ email: email.trim().toLowerCase() });
+  if (existe) {
+    res.status(409);
+    throw new Error('Ya existe un usuario registrado con ese email');
+  }
+
+  // 6. Hashear y guardar (el número 10 es el "costo" del hash)
+  const passwordHash = await bcrypt.hash(password, 10);
+  const usuario = await Usuario.create({ nombre, apellido, email, telefono, passwordHash });
+
+  // Armamos la respuesta a mano para NO devolver el hash
+  res.status(201).json({
+    _id: usuario._id,
+    nombre: usuario.nombre,
+    apellido: usuario.apellido,
+    email: usuario.email,
+    telefono: usuario.telefono,
+    rol: usuario.rol,
+  });
+};
+
+// @desc    Iniciar sesión (con bloqueo a los 3 intentos fallidos)
+// @route   POST /api/auth/login
+// @access  Público
+const login = async (req, res) => {
+  const { email, password } = req.body;
+
+  if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
+    res.status(400);
+    throw new Error('Email y contraseña son obligatorios');
+  }
+
+  const usuario = await Usuario.findOne({ email: email.trim().toLowerCase() }).select('+passwordHash');
+
+  // 1. Cuenta bloqueada: se rechaza SIN mirar la contraseña (aunque sea la correcta)
+  if (usuario && usuario.estaBloqueado()) {
+    const minutos = Math.ceil((usuario.bloqueadoHasta - Date.now()) / 60000);
+    res.status(423);
+    throw new Error(
+      `La cuenta está bloqueada por intentos fallidos. Probá de nuevo en ${minutos} minuto(s) o restablecé tu contraseña desde el mail que te enviamos`
+    );
+  }
+
+  // 2. Comprobar la contraseña
+  const passwordOk = usuario ? await bcrypt.compare(password, usuario.passwordHash) : false;
+
+  if (!usuario || !passwordOk) {
+    if (usuario) {
+      // Suma 1 al contador (la suma la hace la base, en un solo paso)
+      const actualizado = await Usuario.findByIdAndUpdate(
+        usuario._id,
+        { $inc: { intentosFallidos: 1 } },
+        { new: true }
+      );
+
+      if (actualizado.intentosFallidos >= MAX_INTENTOS) {
+        await Usuario.findByIdAndUpdate(usuario._id, {
+          intentosFallidos: 0,
+          bloqueadoHasta: new Date(Date.now() + MINUTOS_BLOQUEO * 60 * 1000),
+        });
+
+        try {
+          await enviarMailRestablecer(usuario, 'bloqueo');
+        } catch (error) {
+          console.error('No se pudo enviar el mail de bloqueo:', error.message);
+        }
+
+        res.status(423);
+        throw new Error(
+          `Demasiados intentos fallidos. La cuenta quedó bloqueada ${MINUTOS_BLOQUEO} minutos y te enviamos un mail para restablecer la contraseña`
+        );
+      }
+    }
+
+    // Mismo mensaje si el email no existe o la contraseña está mal
+    res.status(401);
+    throw new Error('Credenciales inválidas');
+  }
+
+  // 3. Login correcto: el contador vuelve a cero
+  if (usuario.intentosFallidos > 0 || usuario.bloqueadoHasta) {
+    await Usuario.findByIdAndUpdate(usuario._id, { intentosFallidos: 0, bloqueadoHasta: null });
+  }
+
+  const token = jwt.sign(
+    { id: usuario._id, rol: usuario.rol },
+    process.env.JWT_SECRET,
+    { expiresIn: '8h' }
+  );
+
+  res.json({
+    token,
+    usuario: {
+      _id: usuario._id,
+      nombre: usuario.nombre,
+      apellido: usuario.apellido,
+      email: usuario.email,
+      telefono: usuario.telefono,
+      rol: usuario.rol,
+    },
+  });
+};
+// @desc    Ver los datos del administrador logueado
+// @route   GET /api/auth/me
+// @access  Privado (requiere token)
+const perfil = async (req, res) => {
+  const u = req.usuario;
+  res.json({
+    _id: u._id,
+    nombre: u.nombre,
+    apellido: u.apellido,
+    email: u.email,
+    telefono: u.telefono,
+    rol: u.rol,
+  });
+};
+
+// @desc    Cerrar sesión (el token queda invalidado)
+// @route   POST /api/auth/logout
+// @access  Privado (requiere token)
+const logout = async (req, res) => {
+  await TokenInvalidado.create({
+    usuarioId: req.usuario._id,
+    token: req.token,
+    expiraEn: new Date(req.tokenExp * 1000), // el mismo momento en que el token iba a vencer solo
+  });
+  res.json({ mensaje: 'Sesión cerrada correctamente' });
+};
+
+
+// @desc    Modificar los datos personales del administrador logueado
+// @route   PUT /api/auth/me
+// @access  Privado (requiere token)
+const actualizarPerfil = async (req, res) => {
+  // Solo estos campos se pueden modificar (así nadie se cambia el rol ni el hash)
+  const permitidos = ['nombre', 'apellido', 'email', 'telefono'];
+  const cambios = {};
+
+  for (const campo of permitidos) {
+    if (req.body[campo] === undefined) continue; // no lo mandó: no se toca
+    const valor = req.body[campo];
+    if (typeof valor !== 'string' || valor.trim() === '') {
+      res.status(400);
+      throw new Error(`El campo ${campo} no puede estar vacío`);
+    }
+    cambios[campo] = valor.trim();
+  }
+
+  if (Object.keys(cambios).length === 0) {
+    res.status(400);
+    throw new Error('No se envió ningún dato para modificar');
+  }
+
+  if (cambios.email !== undefined) {
+    cambios.email = cambios.email.toLowerCase();
+    if (!REGEX_EMAIL.test(cambios.email)) {
+      res.status(400);
+      throw new Error('El email no tiene un formato válido');
+    }
+    // El email no puede pertenecer a OTRO usuario (el propio no cuenta)
+    const otro = await Usuario.findOne({ email: cambios.email, _id: { $ne: req.usuario._id } });
+    if (otro) {
+      res.status(409);
+      throw new Error('Ya existe otro usuario registrado con ese email');
+    }
+  }
+
+  if (cambios.telefono !== undefined && !REGEX_TELEFONO.test(cambios.telefono)) {
+    res.status(400);
+    throw new Error('El teléfono no es válido (entre 8 y 20 caracteres: números, +, espacios, guiones o paréntesis)');
+  }
+
+  const usuario = await Usuario.findByIdAndUpdate(req.usuario._id, cambios, {
+    new: true,
+    runValidators: true,
+  });
+
+  res.json({
+    _id: usuario._id,
+    nombre: usuario.nombre,
+    apellido: usuario.apellido,
+    email: usuario.email,
+    telefono: usuario.telefono,
+    rol: usuario.rol,
+  });
+};
+
+// @desc    Pedir el mail para restablecer la contraseña
+// @route   POST /api/auth/forgot-password
+// @access  Público
+const forgotPassword = async (req, res) => {
+  const { email } = req.body;
+
+  if (typeof email !== 'string' || !REGEX_EMAIL.test(email.trim())) {
+    res.status(400);
+    throw new Error('Ingresá un email válido');
+  }
+
+  const usuario = await Usuario.findOne({ email: email.trim().toLowerCase() });
+
+  if (usuario) {
+    try {
+      await enviarMailRestablecer(usuario, 'solicitud');
+    } catch (error) {
+      // Si el mail falla lo vemos acá, pero la respuesta al cliente no cambia
+      console.error('No se pudo enviar el mail de recuperación:', error.message);
+    }
+  }
+
+  // Misma respuesta exista o no el email, para no revelar qué emails están registrados
+  res.json({
+    mensaje: 'Si el email está registrado, te enviamos un mail con las instrucciones para restablecer la contraseña',
+  });
+};
+
+// @desc    Cambiar la contraseña usando el código que llegó por mail
+// @route   PUT /api/auth/reset-password/:token
+// @access  Público (el código del mail es la autorización)
+const resetPassword = async (req, res) => {
+  const { token } = req.params;
+  const { password } = req.body;
+
+  if (typeof password !== 'string' || password.length === 0) {
+    res.status(400);
+    throw new Error('La contraseña es obligatoria');
+  }
+
+  const errores = validarPassword(password);
+  if (errores.length > 0) {
+    res.status(400);
+    throw new Error(`La contraseña ${errores.join(', ')}`);
+  }
+
+  // En la base está el hash del código, así que buscamos por el hash del que llegó
+  const registro = await ResetToken.findOne({
+    token: hashToken(token),
+    expiraEn: { $gt: new Date() }, // que no haya vencido
+  });
+  if (!registro) {
+    res.status(400);
+    throw new Error('El link es inválido o venció. Pedí uno nuevo');
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  const usuario = await Usuario.findByIdAndUpdate(registro.usuarioId, {
+    passwordHash,
+    intentosFallidos: 0, // también desbloquea la cuenta si estaba bloqueada
+    bloqueadoHasta: null,
+  });
+  if (!usuario) {
+    res.status(400);
+    throw new Error('El link es inválido o venció. Pedí uno nuevo');
+  }
+
+  // El código se usa una sola vez
+  await ResetToken.deleteMany({ usuarioId: registro.usuarioId });
+
+  res.json({ mensaje: 'Contraseña actualizada. Ya podés iniciar sesión con la nueva' });
+};
+
+
+module.exports = { registro, login, perfil, logout, actualizarPerfil, forgotPassword, resetPassword };
+</file>
+
+<file path="controllers/categoriaController.js">
+const Categoria = require('../models/Categoria');
+const Publicacion = require('../models/Publicacion');
+
+// @desc    Listar todas las categorías
+// @route   GET /api/categorias
+// @access  Público
+const getCategorias = async (req, res) => {
+  const categorias = await Categoria.find().sort({ nombre: 1 });
+  res.json(categorias);
+};
+
+// @desc    Obtener una categoría por id
+// @route   GET /api/categorias/:id
+// @access  Público
+const getCategoriaById = async (req, res) => {
+  const categoria = await Categoria.findById(req.params.id);
+
+  if (!categoria) {
+    res.status(404);
+    throw new Error('Categoría no encontrada');
+  }
+
+  res.json(categoria);
+};
+
+// @desc    Crear una categoría
+// @route   POST /api/categorias
+// @access  Privado/Admin (todavía sin proteger, lo sumamos en el paso 4)
+const crearCategoria = async (req, res) => {
+  const { nombre, descripcion, tipo, activo } = req.body;
+
+  const categoria = await Categoria.create({ nombre, descripcion, tipo, activo });
+  res.status(201).json(categoria);
+};
+
+// @desc    Modificar una categoría
+// @route   PUT /api/categorias/:id
+// @access  Privado/Admin
+const actualizarCategoria = async (req, res) => {
+  const categoria = await Categoria.findById(req.params.id);
+
+  if (!categoria) {
+    res.status(404);
+    throw new Error('Categoría no encontrada');
+  }
+
+  categoria.nombre = req.body.nombre ?? categoria.nombre;
+  categoria.descripcion = req.body.descripcion ?? categoria.descripcion;
+  categoria.tipo = req.body.tipo ?? categoria.tipo;
+  categoria.activo = req.body.activo ?? categoria.activo;
+
+  const categoriaActualizada = await categoria.save();
+  res.json(categoriaActualizada);
+};
+
+// @desc    Eliminar una categoría
+// @route   DELETE /api/categorias/:id
+// @access  Privado/Admin
+const eliminarCategoria = async (req, res) => {
+  const categoria = await Categoria.findById(req.params.id);
+
+  if (!categoria) {
+    res.status(404);
+    throw new Error('Categoría no encontrada');
+  }
+
+  // Regla de integridad: si hay publicaciones usando esta categoría, no la dejamos borrar
+  // (si no, esas publicaciones quedarían con una referencia "colgada" a una categoría inexistente).
+  const productosAsociados = await Publicacion.countDocuments({ categoriaId: categoria._id });
+  if (productosAsociados > 0) {
+    res.status(400);
+    throw new Error(
+      `No se puede eliminar: hay ${productosAsociados} producto(s) que usan esta categoría`
+    );
+  }
+
+  await categoria.deleteOne();
+  res.json({ message: 'Categoría eliminada' });
+};
+
+module.exports = {
+  getCategorias,
+  getCategoriaById,
+  crearCategoria,
+  actualizarCategoria,
+  eliminarCategoria,
+};
+</file>
+
+<file path="controllers/consultaControllers.js">
+const Consulta = require('../models/Consulta');
+
+// @desc    Crear una consulta (formulario de contacto)
+// @route   POST /api/consultas
+// @access  Público
+const crearConsulta = async (req, res) => {
+  const { publicacionId, nombre, email, telefono, asunto, mensaje } = req.body;
+
+  const consulta = await Consulta.create({
+    publicacionId,
+    nombre,
+    email,
+    telefono,
+    asunto,
+    mensaje,
+  });
+
+  res.status(201).json(consulta);
+};
+
+// @desc    Listar todas las consultas (admite ?estado=pendiente para filtrar)
+// @route   GET /api/consultas
+// @access  Privado/Admin
+const getConsultas = async (req, res) => {
+  const filtro = {};
+  if (req.query.estado) filtro.estado = req.query.estado;
+
+  const consultas = await Consulta.find(filtro).sort({ createdAt: -1 });
+  res.json(consultas);
+};
+
+// @desc    Obtener una consulta por id
+// @route   GET /api/consultas/:id
+// @access  Privado/Admin
+const getConsultaById = async (req, res) => {
+  const consulta = await Consulta.findById(req.params.id);
+
+  if (!consulta) {
+    res.status(404);
+    throw new Error('Consulta no encontrada');
+  }
+
+  res.json(consulta);
+};
+
+// @desc    Cambiar el estado de una consulta (pendiente/leida/respondida)
+// @route   PATCH /api/consultas/:id/estado
+// @access  Privado/Admin
+const actualizarEstadoConsulta = async (req, res) => {
+  const { estado } = req.body;
+  const estadosValidos = ['pendiente', 'leida', 'respondida'];
+
+  if (!estadosValidos.includes(estado)) {
+    res.status(400);
+    throw new Error(`El estado debe ser uno de: ${estadosValidos.join(', ')}`);
+  }
+
+  const consulta = await Consulta.findById(req.params.id);
+
+  if (!consulta) {
+    res.status(404);
+    throw new Error('Consulta no encontrada');
+  }
+
+  consulta.estado = estado;
+  const consultaActualizada = await consulta.save();
+  res.json(consultaActualizada);
+};
+
+// @desc    Eliminar una consulta
+// @route   DELETE /api/consultas/:id
+// @access  Privado/Admin
+const eliminarConsulta = async (req, res) => {
+  const consulta = await Consulta.findById(req.params.id);
+
+  if (!consulta) {
+    res.status(404);
+    throw new Error('Consulta no encontrada');
+  }
+
+  await consulta.deleteOne();
+  res.json({ message: 'Consulta eliminada' });
+};
+
+module.exports = {
+  crearConsulta,
+  getConsultas,
+  getConsultaById,
+  actualizarEstadoConsulta,
+  eliminarConsulta,
+};
+</file>
+
+<file path="controllers/publicacionController.js">
+const Publicacion = require('../models/Publicacion');
+const Categoria = require('../models/Categoria');
+
+const CAMPOS_ACTUALIZABLES = [
+  'nombre', 'categoriaId', 'descripcion', 'tipo', 'nivel',
+  'precio', 'unidadPrecio', 'imagenes', 'estado', 'destacado', 'activo'
+];
+
+const escaparRegex = (texto) => texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const armarFiltro = (query) => {
+  const { categoriaId, tipo, q } = query;
+  const filtro = {};
+
+  if (typeof categoriaId === 'string' && categoriaId) filtro.categoriaId = categoriaId;
+  if (typeof tipo === 'string' && tipo) filtro.tipo = tipo;
+  if (typeof q === 'string' && q.trim()) {
+    const texto = escaparRegex(q.trim().slice(0, 100));
+    filtro.$or = [
+      { nombre: { $regex: texto, $options: 'i' } },
+      { descripcion: { $regex: texto, $options: 'i' } }
+    ];
+  }
+
+  return filtro;
+};
+
+const getPublicaciones = async (req, res) => {
+  const filtro = { ...armarFiltro(req.query), activo: true };
+
+  const publicaciones = await Publicacion.find(filtro)
+    .populate('categoriaId', 'nombre')
+    .sort({ createdAt: -1 });
+
+  res.json(publicaciones);
+};
+
+const getPublicacionesAdmin = async (req, res) => {
+  const filtro = armarFiltro(req.query);
+  if (req.query.activo === 'true') filtro.activo = true;
+  if (req.query.activo === 'false') filtro.activo = false;
+
+  const publicaciones = await Publicacion.find(filtro)
+    .populate('categoriaId', 'nombre')
+    .sort({ createdAt: -1 });
+
+  res.json(publicaciones);
+};
+
+const getPublicacionById = async (req, res) => {
+  const publicacion = await Publicacion.findById(req.params.id).populate('categoriaId', 'nombre');
+
+  if (!publicacion || !publicacion.activo) {
+    res.status(404);
+    throw new Error('Publicación no encontrada');
+  }
+
+  res.json(publicacion);
+};
+
+const crearPublicacion = async (req, res) => {
+  const categoria = await Categoria.findById(req.body.categoriaId);
+  if (!categoria) {
+    res.status(400);
+    throw new Error('La categoría indicada no existe');
+  }
+
+  const datos = {};
+  CAMPOS_ACTUALIZABLES.forEach((campo) => {
+    if (req.body[campo] !== undefined) datos[campo] = req.body[campo];
+  });
+
+  const publicacion = await Publicacion.create(datos);
+  res.status(201).json(publicacion);
+};
+
+const actualizarPublicacion = async (req, res) => {
+  const publicacion = await Publicacion.findById(req.params.id);
+
+  if (!publicacion) {
+    res.status(404);
+    throw new Error('Publicación no encontrada');
+  }
+
+  CAMPOS_ACTUALIZABLES.forEach((campo) => {
+    if (req.body[campo] !== undefined) publicacion[campo] = req.body[campo];
+  });
+
+  const publicacionActualizada = await publicacion.save();
+  res.json(publicacionActualizada);
+};
+
+const eliminarPublicacion = async (req, res) => {
+  const publicacion = await Publicacion.findById(req.params.id);
+
+  if (!publicacion) {
+    res.status(404);
+    throw new Error('Publicación no encontrada');
+  }
+
+  await publicacion.deleteOne();
+  res.json({ message: 'Publicación eliminada' });
+};
+
+module.exports = {
+  getPublicaciones,
+  getPublicacionesAdmin,
+  getPublicacionById,
+  crearPublicacion,
+  actualizarPublicacion,
+  eliminarPublicacion
+};
+</file>
+
+<file path="middleware/authMiddleware.js">
+const jwt = require('jsonwebtoken');
+const Usuario = require('../models/Usuario');
+const TokenInvalidado = require('../models/TokenInvalidado');
+
+// Guardia de rutas: solo deja pasar a quien manda un token válido.
+// El token viaja en el header:  Authorization: Bearer <token>
+const protect = async (req, res, next) => {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    res.status(401);
+    throw new Error('No autorizado: falta el token');
+  }
+  const token = header.split(' ')[1];
+
+  // 1. La firma es auténtica y no venció
+  let decoded;
+  try {
+    decoded = jwt.verify(token, process.env.JWT_SECRET);
+  } catch (error) {
+    res.status(401);
+    throw new Error('No autorizado: el token es inválido o venció');
+  }
+
+  // 2. No fue invalidado por un logout
+  const invalidado = await TokenInvalidado.findOne({ token });
+  if (invalidado) {
+    res.status(401);
+    throw new Error('No autorizado: la sesión fue cerrada');
+  }
+
+  // 3. El usuario todavía existe
+  const usuario = await Usuario.findById(decoded.id);
+  if (!usuario) {
+    res.status(401);
+    throw new Error('No autorizado: el usuario ya no existe');
+  }
+
+  // Dejamos los datos a mano para los controllers que vienen después
+  req.usuario = usuario;
+  req.token = token;
+  req.tokenExp = decoded.exp;
+  next();
+};
+
+// Deja pasar solo a quien tiene rol de administrador.
+// Va SIEMPRE después de protect (protect es quien carga req.usuario).
+const soloAdmin = (req, res, next) => {
+  if (!req.usuario || req.usuario.rol !== 'administrador') {
+    res.status(403);
+    throw new Error('Acceso denegado: se requiere rol de administrador');
+  }
+  next();
+};
+
+module.exports = { protect, soloAdmin };
+</file>
+
+<file path="middleware/errorMiddleware.js">
+// Middleware de manejo de errores centralizado.
+// Con Express 5, si un controller async tira un error (throw) o rechaza una promesa,
+// Express lo agarra solo y lo manda para acá. Así evitamos repetir try/catch en cada controller.
+
+// Se ejecuta cuando ninguna ruta matcheó la URL pedida (siempre va al final de todas las rutas).
+const notFound = (req, res, next) => {
+  const error = new Error(`Ruta no encontrada - ${req.originalUrl}`);
+  res.status(404);
+  next(error); // le pasamos el error al errorHandler de abajo
+};
+
+// Middleware de errores "real": Express lo reconoce como tal porque tiene 4 parámetros (err primero).
+// Tiene que ser el ÚLTIMO app.use() del server.
+const errorHandler = (err, req, res, next) => {
+  // Si el controller ya seteó un status de error (ej. res.status(404) antes del throw), lo respetamos.
+  // Si nadie seteó nada, el status va a haber quedado en 200, así que lo pasamos a 500.
+  let statusCode = res.statusCode === 200 ? 500 : res.statusCode;
+  let message = err.message;
+
+  // Mongoose: alguien mandó un id con formato inválido (ej. "abc123" en vez de un ObjectId real).
+  if (err.name === 'CastError' && err.kind === 'ObjectId') {
+    statusCode = 404;
+    message = 'Recurso no encontrado';
+  }
+
+  // Mongoose: se violó un índice unique (ej. email o nombre de categoría repetido).
+  if (err.code === 11000) {
+    const campo = Object.keys(err.keyValue).join(', ');
+    statusCode = 400;
+    message = `Ya existe un registro con ese valor en el campo: ${campo}`;
+  }
+
+  // Mongoose: fallaron las validaciones del schema (required, enum, minlength, etc.).
+  if (err.name === 'ValidationError') {
+    statusCode = 400;
+    message = Object.values(err.errors).map((val) => val.message).join('. ');
+  }
+
+  res.status(statusCode).json({
+    message,
+
+    stack: process.env.NODE_ENV === 'production' ? undefined : err.stack,
+  });
+};
+
+module.exports = { notFound, errorHandler };
+</file>
+
+<file path="models/Categoria.js">
+const mongoose = require('mongoose');
+
+const categoriaSchema = new mongoose.Schema({
+  nombre: { type: String, required: true, unique: true, trim: true },
+  descripcion: { type: String, trim: true },
+  tipo: { type: String, enum: ['producto', 'servicio'], required: true },
+  activo: { type: Boolean, default: true }
+}, {
+  timestamps: true
+});
+
+module.exports = mongoose.model('Categoria', categoriaSchema);
+</file>
+
+<file path="models/ComercioInfo.js">
+const mongoose = require('mongoose');
+
+const comercioInfoSchema = new mongoose.Schema({
+    adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'Usuario', required: true },
+    nombre: { type: String, required: true, default: 'Aloha Surf Shop' },
+    descripcion: { type: String, required: true },
+    direccion: { type: String, required: true },
+    telefono: { type: String, required: true },
+    email: { type: String, required: true },
+    horarios: { type: String, required: true }, // texto libre, ej. "Lunes a viernes de 9 a 18hs"
+    redesSociales: {
+    instagram: { type: String, default: '' },
+    facebook: { type: String, default: '' },
+    whatsapp: { type: String, default: '' },
+    tiktok: { type: String, default: '' }
+    }
+}, {
+  timestamps: true
+});
+
+module.exports = mongoose.model('ComercioInfo', comercioInfoSchema, 'comercio');
+</file>
+
+<file path="models/Consulta.js">
+const mongoose = require('mongoose');
+
+const consultaSchema = new mongoose.Schema({
+  publicacionId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Publicacion',
+    required: false // null = consulta general "Contacto"; con valor = consulta sobre esa publicación
+  },
+  nombre: { type: String, required: true, trim: true },
+  email: { type: String, required: true, trim: true },
+  telefono: { type: String, trim: true },
+  asunto: { type: String, required: true, trim: true },
+  mensaje: { type: String, required: true },
+  estado: { 
+    type: String, 
+    enum: ['pendiente', 'leida', 'respondida'], 
+    default: 'pendiente' 
+  }
+}, {
+  timestamps: true
+});
+
+module.exports = mongoose.model('Consulta', consultaSchema);
+</file>
+
+<file path="models/Publicacion.js">
+const mongoose = require('mongoose');
+
+const TIPOS_PUBLICACION = ['alquiler_tabla', 'alquiler_ropa', 'alquiler_equipo', 'clase', 'merch'];
+const NIVELES = ['principiante', 'intermedio', 'profesional'];
+const UNIDADES_PRECIO = ['dia', 'clase', 'unidad'];
+const ESTADOS = ['disponible', 'no_disponible'];
+
+const publicacionSchema = new mongoose.Schema({
+  nombre: { type: String, required: true, trim: true },
+  categoriaId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Categoria',
+    required: true
+  },
+  descripcion: { type: String, required: true },
+  tipo: { type: String, enum: TIPOS_PUBLICACION, required: true },
+  nivel: {
+    type: String,
+    enum: NIVELES,
+    // required condicional: Mongoose sí ejecuta esta función aunque el campo venga vacío
+    // (a diferencia de "validate", que Mongoose ni siquiera llama si el valor es undefined).
+    required: [
+      function () { return this.tipo === 'clase'; },
+      'nivel es obligatorio cuando tipo = "clase"'
+    ]
+  },
+  precio: { type: Number, default: 0 },
+  unidadPrecio: { type: String, enum: UNIDADES_PRECIO, default: 'unidad' },
+  imagenes: {
+    type: [{ type: String, required: true }],
+    validate: {
+      validator: (arr) => arr.length > 0,
+      message: 'La publicación necesita al menos una imagen'
+    }
+  },
+  estado: { type: String, enum: ESTADOS, default: 'disponible' },
+  destacado: { type: Boolean, default: false },
+  activo: { type: Boolean, default: true } // visible/oculta en el sitio (distinto de "estado")
+}, {
+  timestamps: true
+});
+
+module.exports = mongoose.model('Publicacion', publicacionSchema, 'publicaciones');
+</file>
+
+<file path="models/ResetToken.js">
+const mongoose = require('mongoose');
+
+const resetTokenSchema = new mongoose.Schema({
+  usuarioId: { type: mongoose.Schema.Types.ObjectId, ref: 'Usuario', required: true },
+  token: { type: String, required: true },
+  expiraEn: { type: Date, required: true }
+});
+
+// Índice TTL: Mongo borra el documento solo, apenas se cumple la fecha de "expiraEn".
+// expireAfterSeconds: 0 significa "en el momento exacto que indica el campo", no X segundos después.
+resetTokenSchema.index({ expiraEn: 1 }, { expireAfterSeconds: 0 });
+
+module.exports = mongoose.model('ResetToken', resetTokenSchema);
+</file>
+
+<file path="models/TokenInvalidado.js">
+const mongoose = require('mongoose');
+
+const tokenInvalidadoSchema = new mongoose.Schema({
+  usuarioId: { type: mongoose.Schema.Types.ObjectId, ref: 'Usuario', required: true },
+  token: { type: String, required: true }, // el JWT que quedó invalidado al cerrar sesión
+  expiraEn: { type: Date, required: true } // misma fecha en la que el JWT iba a vencer solo
+});
+
+// Mismo índice TTL: no tiene sentido guardar en la lista negra un token para siempre,
+// una vez que el JWT venció por su cuenta ya no hace falta seguir bloqueándolo.
+tokenInvalidadoSchema.index({ expiraEn: 1 }, { expireAfterSeconds: 0 });
+
+module.exports = mongoose.model('TokenInvalidado', tokenInvalidadoSchema);
+</file>
+
+<file path="models/Usuario.js">
+const mongoose = require('mongoose');
+
+const usuarioSchema = new mongoose.Schema({
+  nombre: { type: String, required: true, trim: true },
+  apellido: { type: String, required: true, trim: true },
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    lowercase: true,
+    trim: true,
+    match: [/^\S+@\S+\.\S+$/, 'El email no tiene un formato válido']
+  },
+  telefono: { type: String, required: true, trim: true },
+  // select: false => la consulta NO trae el hash salvo que lo pidamos a propósito
+  passwordHash: { type: String, required: true, select: false },
+  rol: { type: String, enum: ['administrador'], default: 'administrador' },
+  passwordCambiadaEn: { type: Date, default: Date.now },
+
+  // Control de bloqueo por intentos fallidos
+  intentosFallidos: { type: Number, default: 0 },
+  bloqueadoHasta: { type: Date, default: null }
+}, {
+  timestamps: true
+});
+
+// true si la cuenta sigue bloqueada en este momento
+usuarioSchema.methods.estaBloqueado = function () {
+  return !!this.bloqueadoHasta && this.bloqueadoHasta > Date.now();
+};
+
+module.exports = mongoose.model('Usuario', usuarioSchema);
+</file>
+
+<file path="routes/authRoutes.js">
+const express = require('express');
+const router = express.Router();
+const { registro, login, perfil, logout, actualizarPerfil, forgotPassword, resetPassword } = require('../controllers/authController');
+const { protect } = require('../middleware/authMiddleware');
+
+router.post('/registro', registro);
+router.post('/login', login);
+router.post('/forgot-password', forgotPassword);
+router.put('/reset-password/:token', resetPassword);
+router.get('/me', protect, perfil);
+router.put('/me', protect, actualizarPerfil);
+router.post('/logout', protect, logout);
+
+module.exports = router;
+</file>
+
+<file path="routes/categoriaRoutes.js">
+const express = require('express');
+const router = express.Router();
+const {
+  getCategorias,
+  getCategoriaById,
+  crearCategoria,
+  actualizarCategoria,
+  eliminarCategoria,
+} = require('../controllers/categoriaController');
+const { protect, soloAdmin } = require('../middleware/authMiddleware');
+
+// Leer es público (lo usa el sitio). Crear, editar y borrar: solo el administrador.
+router.route('/').get(getCategorias).post(protect, soloAdmin, crearCategoria);
+
+router
+  .route('/:id')
+  .get(getCategoriaById)
+  .put(protect, soloAdmin, actualizarCategoria)
+  .delete(protect, soloAdmin, eliminarCategoria);
+
+module.exports = router;
+</file>
+
+<file path="routes/ConsultaRoutes.js">
+const express = require('express');
+const router = express.Router();
+const {
+  crearConsulta,
+  getConsultas,
+  getConsultaById,
+  actualizarEstadoConsulta,
+  eliminarConsulta,
+} = require('../controllers/consultaControllers');
+const { protect, soloAdmin } = require('../middleware/authMiddleware');
+
+// El formulario de contacto es lo único público. Todo lo demás: solo el administrador.
+router.route('/').get(protect, soloAdmin, getConsultas).post(crearConsulta);
+
+router
+  .route('/:id')
+  .get(protect, soloAdmin, getConsultaById)
+  .delete(protect, soloAdmin, eliminarConsulta);
+
+router.route('/:id/estado').patch(protect, soloAdmin, actualizarEstadoConsulta);
+
+module.exports = router;
+</file>
+
+<file path="routes/publicacionRoutes.js">
+const express = require('express');
+const router = express.Router();
+const {
+  getPublicaciones,
+  getPublicacionesAdmin,
+  getPublicacionById,
+  crearPublicacion,
+  actualizarPublicacion,
+  eliminarPublicacion
+} = require('../controllers/publicacionController');
+const { protect, soloAdmin } = require('../middleware/authMiddleware');
+
+router.route('/').get(getPublicaciones).post(protect, soloAdmin, crearPublicacion);
+
+router.get('/admin/todas', protect, soloAdmin, getPublicacionesAdmin);
+
+router
+  .route('/:id')
+  .get(getPublicacionById)
+  .put(protect, soloAdmin, actualizarPublicacion)
+  .delete(protect, soloAdmin, eliminarPublicacion);
+
+module.exports = router;
+</file>
+
+<file path="utils/enviarMail.js">
+const nodemailer = require('nodemailer');
+
+// Datos de la cuenta que envía los mails (salen del .env)
+const crearTransporte = () =>
+  nodemailer.createTransport({
+    host: process.env.MAIL_HOST || 'smtp.gmail.com',
+    port: Number(process.env.MAIL_PORT) || 465,
+    secure: true,
+    auth: { user: process.env.MAIL_USER, pass: process.env.MAIL_PASS },
+  });
+
+// Envía un mail. Recibe: { para, asunto, texto, html }
+const enviarMail = async ({ para, asunto, texto, html }) => {
+  if (!process.env.MAIL_USER || !process.env.MAIL_PASS) {
+    throw new Error('Falta configurar MAIL_USER y MAIL_PASS en el .env');
+  }
+
+  const transporte = crearTransporte();
+  return transporte.sendMail({
+    from: `"Surf Shop" <${process.env.MAIL_USER}>`,
+    to: para,
+    subject: asunto,
+    text: texto,
+    html,
+  });
+};
+
+module.exports = { enviarMail };
+</file>
+
+<file path="utils/recuperacion.js">
+const crypto = require('crypto');
+const ResetToken = require('../models/ResetToken');
+const { enviarMail } = require('./enviarMail');
+
+const UNA_HORA = 60 * 60 * 1000;
+
+// En la base guardamos el HASH del token, no el token en sí:
+// así, aunque alguien viera la colección, no podría usar ningún link.
+const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
+
+// Crea un token nuevo (borrando los anteriores del usuario) y le manda el mail con el link.
+// motivo: 'solicitud' (pidió recuperar) o 'bloqueo' (la cuenta se bloqueó por intentos fallidos)
+const enviarMailRestablecer = async (usuario, motivo = 'solicitud') => {
+  const token = crypto.randomBytes(32).toString('hex');
+
+  await ResetToken.deleteMany({ usuarioId: usuario._id });
+  await ResetToken.create({
+    usuarioId: usuario._id,
+    token: hashToken(token),
+    expiraEn: new Date(Date.now() + UNA_HORA),
+  });
+
+  const base = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const link = `${base}/restablecer-password/${token}`;
+
+  const intro =
+    motivo === 'bloqueo'
+      ? 'Tu cuenta se bloqueó por 15 minutos después de 3 intentos fallidos de ingreso. Si fuiste vos, podés esperar y volver a probar, o restablecer tu contraseña ahora.'
+      : 'Recibimos un pedido para restablecer tu contraseña.';
+
+  await enviarMail({
+    para: usuario.email,
+    asunto: 'Restablecer tu contraseña - Surf Shop',
+    texto:
+      `Hola ${usuario.nombre}!\n\n${intro}\n\n` +
+      `Entrá a este link (vale 1 hora):\n${link}\n\n` +
+      `Si el link no abre, tu código es:\n${token}\n\n` +
+      `Si no fuiste vos, ignorá este mail.`,
+    html:
+      `<p>Hola ${usuario.nombre}!</p><p>${intro}</p>` +
+      `<p><a href="${link}">Restablecer mi contraseña</a> (vale 1 hora)</p>` +
+      `<p>Si el link no abre, tu código es:<br><code>${token}</code></p>` +
+      `<p>Si no fuiste vos, ignorá este mail.</p>`,
+  });
+};
+
+module.exports = { hashToken, enviarMailRestablecer };
+</file>
+
+<file path="utils/validarPassword.js">
+// Valida la contraseña original (antes de hashearla).
+// Devuelve un array con los errores encontrados; si está vacío, la contraseña es válida.
+const validarPassword = (password) => {
+  if (typeof password !== 'string' || password.length === 0) {
+    return ['La contraseña es obligatoria'];
+  }
+
+  const errores = [];
+
+  if (password.length < 8) errores.push('debe tener al menos 8 caracteres');
+  if (password.length > 64) errores.push('no puede superar los 64 caracteres');
+  if (!/[a-z]/.test(password)) errores.push('debe incluir al menos una minúscula');
+  if (!/[A-Z]/.test(password)) errores.push('debe incluir al menos una mayúscula');
+  if (!/\d/.test(password)) errores.push('debe incluir al menos un número');
+  if (!/[^A-Za-z0-9\s]/.test(password)) errores.push('debe incluir al menos un símbolo (ej. ! # $ %)');
+  if (/\s/.test(password)) errores.push('no puede tener espacios');
+
+  return errores;
+};
+
+module.exports = { validarPassword };
+</file>
+
+<file path=".env.ejemplo">
+PORT=5000
+MONGO_URI=mongodb+srv://usuario:password@cluster.mongodb.net/surfshop?appName=surfshop-cluster
+# Importante: el segmento "/surfshop" antes del "?" es el nombre de la base de datos.
+# Si se omite, Mongoose guarda todo en una base llamada "test" por defecto.
+JWT_SECRET=
+FRONTEND_URL=
+CODIGO_ADMIN=
+MAIL_USER=
+MAIL_PASS=
+</file>
+
+<file path="package.json">
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.9.3",
+    "nodemailer": "^10.0.10"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
+</file>
+
+<file path="server.js">
+// backend/server.js
+const express = require('express');
+const cors = require('cors');
+require('dotenv').config();
+const connectDB = require('./config/db');
+
+require('./models/Usuario');
+require('./models/Categoria');
+require('./models/Publicacion');
+require('./models/Consulta');
+require('./models/ComercioInfo');
+require('./models/ResetToken');
+require('./models/TokenInvalidado');
+
+const categoriaRoutes = require('./routes/categoriaRoutes');
+const consultaRoutes = require('./routes/ConsultaRoutes');
+const publicacionRoutes = require('./routes/publicacionRoutes');
+const authRoutes = require('./routes/authRoutes');
+const { notFound, errorHandler } = require('./middleware/errorMiddleware');
+
+// 1. Inicializar la app de Express
+const app = express();
+
+// 2. Conectar a la base de datos
+connectDB();
+
+// 3. Middlewares globales
+app.use(cors()); // Permite peticiones desde el frontend de React
+app.use(express.json()); // Permite al servidor entender datos en formato JSON
+
+// 4. Ruta de prueba
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', message: 'Servidor del Surf Shop funcionando' });
+});
+
+// 5. Rutas de la API
+app.use('/api/categorias', categoriaRoutes);
+app.use('/api/consultas', consultaRoutes);
+app.use('/api/publicaciones', publicacionRoutes);
+app.use('/api/auth', authRoutes);
+// 6. Middlewares de error (siempre al final, después de todas las rutas)
+app.use(notFound);
+app.use(errorHandler);
+
+// 7. Iniciar servidor
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`Servidor corriendo en http://localhost:${PORT}`);
+});
+</file>
+
+</files>

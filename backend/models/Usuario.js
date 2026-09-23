@@ -15,6 +15,7 @@ const usuarioSchema = new mongoose.Schema({
   // select: false => la consulta NO trae el hash salvo que lo pidamos a propósito
   passwordHash: { type: String, required: true, select: false },
   rol: { type: String, enum: ['administrador'], default: 'administrador' },
+  passwordCambiadaEn: { type: Date, default: Date.now },
 
   // Control de bloqueo por intentos fallidos
   intentosFallidos: { type: Number, default: 0 },

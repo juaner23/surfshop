@@ -301,6 +301,7 @@ const resetPassword = async (req, res) => {
   const passwordHash = await bcrypt.hash(password, 10);
   const usuario = await Usuario.findByIdAndUpdate(registro.usuarioId, {
     passwordHash,
+    passwordCambiadaEn: Date.now(), // invalida cualquier token viejo emitido antes de este momento
     intentosFallidos: 0, // también desbloquea la cuenta si estaba bloqueada
     bloqueadoHasta: null,
   });

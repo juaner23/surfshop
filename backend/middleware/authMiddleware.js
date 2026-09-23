@@ -35,6 +35,16 @@ const protect = async (req, res, next) => {
     throw new Error('No autorizado: el usuario ya no existe');
   }
 
+  // 4. El token no puede ser de antes del último cambio de contraseña
+  // (decoded.iat = momento en que se firmó el token, en segundos)
+  if (usuario.passwordCambiadaEn) {
+    const passwordCambiadaEnSegundos = Math.floor(usuario.passwordCambiadaEn.getTime() / 1000);
+    if (decoded.iat < passwordCambiadaEnSegundos) {
+      res.status(401);
+      throw new Error('La sesión expiró porque la contraseña cambió. Iniciá sesión de nuevo.');
+    }
+  }
+
   // Dejamos los datos a mano para los controllers que vienen después
   req.usuario = usuario;
   req.token = token;

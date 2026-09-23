@@ -5,7 +5,7 @@ const Publicacion = require('../models/Publicacion');
 // @route   GET /api/categorias
 // @access  Público
 const getCategorias = async (req, res) => {
-  const categorias = await Categoria.find().sort({ nombre: 1 });
+  const categorias = await Categoria.find({ activo: true }).sort({ nombre: 1 });
   res.json(categorias);
 };
 
@@ -15,7 +15,7 @@ const getCategorias = async (req, res) => {
 const getCategoriaById = async (req, res) => {
   const categoria = await Categoria.findById(req.params.id);
 
-  if (!categoria) {
+  if (!categoria || !categoria.activo) {
     res.status(404);
     throw new Error('Categoría no encontrada');
   }
