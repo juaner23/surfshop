@@ -40,4 +40,4 @@ const publicacionSchema = new mongoose.Schema({
   timestamps: true
 });
 
-module.exports = mongoose.model('Publicacion', publicacionSchema);
+module.exports = mongoose.model('Publicacion', publicacionSchema, 'publicaciones');

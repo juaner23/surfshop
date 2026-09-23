@@ -18,4 +18,4 @@ const comercioInfoSchema = new mongoose.Schema({
   timestamps: true
 });
 
-module.exports = mongoose.model('ComercioInfo', comercioInfoSchema);
+module.exports = mongoose.model('ComercioInfo', comercioInfoSchema, 'comercio');
