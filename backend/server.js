@@ -11,12 +11,15 @@ require('./models/Consulta');
 require('./models/ComercioInfo');
 require('./models/ResetToken');
 require('./models/TokenInvalidado');
+require('./models/Promocion');
 
 const categoriaRoutes = require('./routes/categoriaRoutes');
 const consultaRoutes = require('./routes/ConsultaRoutes');
 const publicacionRoutes = require('./routes/publicacionRoutes');
 const authRoutes = require('./routes/authRoutes');
 const comercioRoutes = require('./routes/comercioRoutes');
+const promocionRoutes = require('./routes/promocionRoutes');
+const dashboardRoutes = require('./routes/dashboardRoutes');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 
 // 1. Inicializar la app de Express
@@ -40,6 +43,9 @@ app.use('/api/consultas', consultaRoutes);
 app.use('/api/publicaciones', publicacionRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/comercio', comercioRoutes);
+app.use('/api/promociones', promocionRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+
 // 6. Middlewares de error (siempre al final, después de todas las rutas)
 app.use(notFound);
 app.use(errorHandler);
