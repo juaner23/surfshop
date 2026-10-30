@@ -20,6 +20,7 @@ const authRoutes = require('./routes/authRoutes');
 const comercioRoutes = require('./routes/comercioRoutes');
 const promocionRoutes = require('./routes/promocionRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
+const uploadRoutes = require('./routes/uploadRoutes');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 
 // 1. Inicializar la app de Express
@@ -29,7 +30,13 @@ const app = express();
 connectDB();
 
 // 3. Middlewares globales
-app.use(cors()); // Permite peticiones desde el frontend de React
+// CORS: solo se aceptan pedidos desde el frontend (FRONTEND_URL del .env).
+// Si querés permitir más de un origen, separalos con coma: http://localhost:5173,https://midominio.com
+const origenesPermitidos = (process.env.FRONTEND_URL || 'http://localhost:5173')
+  .split(',')
+  .map((o) => o.trim().replace(/\/$/, ''));
+
+app.use(cors({ origin: origenesPermitidos }));
 app.use(express.json()); // Permite al servidor entender datos en formato JSON
 
 // 4. Ruta de prueba
@@ -45,6 +52,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/comercio', comercioRoutes);
 app.use('/api/promociones', promocionRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // 6. Middlewares de error (siempre al final, después de todas las rutas)
 app.use(notFound);
