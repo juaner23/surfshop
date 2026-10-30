@@ -1,11 +1,19 @@
 const Categoria = require('../models/Categoria');
 const Publicacion = require('../models/Publicacion');
 
-// @desc    Listar todas las categorías
+// @desc    Listar las categorías activas
 // @route   GET /api/categorias
 // @access  Público
 const getCategorias = async (req, res) => {
   const categorias = await Categoria.find({ activo: true }).sort({ nombre: 1 });
+  res.json(categorias);
+};
+
+// @desc    Listar TODAS las categorías (activas e inactivas)
+// @route   GET /api/categorias/admin/todas
+// @access  Privado/Admin
+const getCategoriasAdmin = async (req, res) => {
+  const categorias = await Categoria.find().sort({ nombre: 1 });
   res.json(categorias);
 };
 
@@ -25,7 +33,7 @@ const getCategoriaById = async (req, res) => {
 
 // @desc    Crear una categoría
 // @route   POST /api/categorias
-// @access  Privado/Admin (todavía sin proteger, lo sumamos en el paso 4)
+// @access  Privado/Admin
 const crearCategoria = async (req, res) => {
   const { nombre, descripcion, tipo, activo } = req.body;
 
@@ -65,7 +73,6 @@ const eliminarCategoria = async (req, res) => {
   }
 
   // Regla de integridad: si hay publicaciones usando esta categoría, no la dejamos borrar
-  // (si no, esas publicaciones quedarían con una referencia "colgada" a una categoría inexistente).
   const productosAsociados = await Publicacion.countDocuments({ categoriaId: categoria._id });
   if (productosAsociados > 0) {
     res.status(400);
@@ -80,6 +87,7 @@ const eliminarCategoria = async (req, res) => {
 
 module.exports = {
   getCategorias,
+  getCategoriasAdmin,
   getCategoriaById,
   crearCategoria,
   actualizarCategoria,
