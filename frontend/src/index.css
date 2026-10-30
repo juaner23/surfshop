@@ -1,0 +1,20 @@
+/* Estilos mínimos de la etapa 1. En la etapa 2 se reemplaza por el diseño completo. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+}
+
+nav a {
+  margin-right: 1rem;
+}
+
+main {
+  padding: 1rem;
+}
