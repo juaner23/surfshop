@@ -1,5 +1,3 @@
-// Marcador para las pantallas que todavía no se construyeron.
-// Se va dejando de usar a medida que avanzan las etapas.
 export default function PaginaPendiente({ titulo, etapa }) {
   return (
     <section>

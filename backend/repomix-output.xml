@@ -45,7 +45,10 @@ config/
 controllers/
   authController.js
   categoriaController.js
+  comercioController.js
   consultaControllers.js
+  dashboardController.js
+  promocionController.js
   publicacionController.js
 middleware/
   authMiddleware.js
@@ -54,6 +57,7 @@ models/
   Categoria.js
   ComercioInfo.js
   Consulta.js
+  Promocion.js
   Publicacion.js
   ResetToken.js
   TokenInvalidado.js
@@ -61,7 +65,10 @@ models/
 routes/
   authRoutes.js
   categoriaRoutes.js
+  comercioRoutes.js
   ConsultaRoutes.js
+  dashboardRoutes.js
+  promocionRoutes.js
   publicacionRoutes.js
 utils/
   enviarMail.js
@@ -395,6 +402,7 @@ const resetPassword = async (req, res) => {
   const passwordHash = await bcrypt.hash(password, 10);
   const usuario = await Usuario.findByIdAndUpdate(registro.usuarioId, {
     passwordHash,
+    passwordCambiadaEn: Date.now(), // invalida cualquier token viejo emitido antes de este momento
     intentosFallidos: 0, // también desbloquea la cuenta si estaba bloqueada
     bloqueadoHasta: null,
   });
@@ -421,7 +429,7 @@ const Publicacion = require('../models/Publicacion');
 // @route   GET /api/categorias
 // @access  Público
 const getCategorias = async (req, res) => {
-  const categorias = await Categoria.find().sort({ nombre: 1 });
+  const categorias = await Categoria.find({ activo: true }).sort({ nombre: 1 });
   res.json(categorias);
 };
 
@@ -431,7 +439,7 @@ const getCategorias = async (req, res) => {
 const getCategoriaById = async (req, res) => {
   const categoria = await Categoria.findById(req.params.id);
 
-  if (!categoria) {
+  if (!categoria || !categoria.activo) {
     res.status(404);
     throw new Error('Categoría no encontrada');
   }
@@ -501,6 +509,77 @@ module.exports = {
   actualizarCategoria,
   eliminarCategoria,
 };
+</file>
+
+<file path="controllers/comercioController.js">
+const ComercioInfo = require('../models/ComercioInfo');
+
+// Solo estos campos se pueden crear/modificar desde la API
+// (así nadie toca adminId ni cualquier otro campo que se agregue después al modelo)
+const CAMPOS_PERMITIDOS = [
+  'nombre', 'descripcion', 'direccion', 'telefono', 'email', 'horarios', 'redesSociales'
+];
+
+// Campos obligatorios en el modelo (aparte de adminId, que lo ponemos nosotros)
+const CAMPOS_OBLIGATORIOS = ['descripcion', 'direccion', 'telefono', 'email', 'horarios'];
+
+// @desc    Ver la información pública del comercio
+// @route   GET /api/comercio
+// @access  Público
+const getComercio = async (req, res) => {
+  // Solo existe un documento de comercio en toda la colección
+  const info = await ComercioInfo.findOne();
+
+  if (!info) {
+    res.status(404);
+    throw new Error('Todavía no se cargó la información del comercio');
+  }
+
+  res.json(info);
+};
+
+// @desc    Crear (la primera vez) o actualizar la información del comercio
+// @route   PUT /api/comercio
+// @access  Privado/Admin
+const actualizarComercio = async (req, res) => {
+  const cambios = {};
+  CAMPOS_PERMITIDOS.forEach((campo) => {
+    if (req.body[campo] !== undefined) cambios[campo] = req.body[campo];
+  });
+
+  let info = await ComercioInfo.findOne();
+
+  if (!info) {
+    // Primera vez: no existe el documento todavía.
+    // Exigimos que vengan todos los campos obligatorios del modelo.
+    const faltantes = CAMPOS_OBLIGATORIOS.filter((campo) => cambios[campo] === undefined);
+    if (faltantes.length > 0) {
+      res.status(400);
+      throw new Error(`Para crear la info del comercio faltan los campos: ${faltantes.join(', ')}`);
+    }
+
+    info = await ComercioInfo.create({
+      adminId: req.usuario._id,
+      ...cambios,
+    });
+
+    return res.status(201).json(info);
+  }
+
+  // Ya existe: actualización parcial (solo se tocan los campos que vinieron)
+  if (cambios.redesSociales) {
+    // Merge en vez de reemplazo, para no borrar redes que no se mandaron en este PUT
+    const actuales = info.redesSociales?.toObject ? info.redesSociales.toObject() : (info.redesSociales || {});
+    cambios.redesSociales = { ...actuales, ...cambios.redesSociales };
+  }
+
+  Object.assign(info, cambios);
+  const infoActualizada = await info.save();
+
+  res.json(infoActualizada);
+};
+
+module.exports = { getComercio, actualizarComercio };
 </file>
 
 <file path="controllers/consultaControllers.js">
@@ -597,6 +676,247 @@ module.exports = {
 };
 </file>
 
+<file path="controllers/dashboardController.js">
+const Publicacion = require('../models/Publicacion');
+const Consulta = require('../models/Consulta');
+const Promocion = require('../models/Promocion');
+const Categoria = require('../models/Categoria');
+
+// Convierte el resultado de un $group de Mongo, que viene como array
+// [{ _id: 'alquiler_tabla', count: 4 }, ...], en un objeto plano { alquiler_tabla: 4, ... }
+// (mucho más cómodo de leer y de consumir después desde el frontend)
+const arrayAObjeto = (arr) =>
+  arr.reduce((acc, item) => {
+    acc[item._id] = item.count;
+    return acc;
+  }, {});
+
+// @desc    Métricas y estadísticas generales para el panel del administrador
+// @route   GET /api/dashboard
+// @access  Privado/Admin
+const getDashboard = async (req, res) => {
+  const ahora = new Date();
+
+  // Promise.all: todas las consultas a la base corren en paralelo, no una atrás de la otra.
+  const [
+    publicacionesTotal,
+    publicacionesActivas,
+    publicacionesInactivas,
+    publicacionesDestacadas,
+    publicacionesPorTipo,
+    consultasTotal,
+    consultasPendientes,
+    consultasLeidas,
+    consultasRespondidas,
+    promocionesVigentes,
+    promocionesVencidas,
+    categoriasTotal,
+    categoriasActivas,
+  ] = await Promise.all([
+    Publicacion.countDocuments({}),
+    Publicacion.countDocuments({ activo: true }),
+    Publicacion.countDocuments({ activo: false }),
+    Publicacion.countDocuments({ destacado: true }),
+    Publicacion.aggregate([{ $group: { _id: '$tipo', count: { $sum: 1 } } }]),
+    Consulta.countDocuments({}),
+    Consulta.countDocuments({ estado: 'pendiente' }),
+    Consulta.countDocuments({ estado: 'leida' }),
+    Consulta.countDocuments({ estado: 'respondida' }),
+    Promocion.countDocuments({ activo: true, fechaInicio: { $lte: ahora }, fechaFin: { $gte: ahora } }),
+    Promocion.countDocuments({ fechaFin: { $lt: ahora } }),
+    Categoria.countDocuments({}),
+    Categoria.countDocuments({ activo: true }),
+  ]);
+
+  res.json({
+    publicaciones: {
+      total: publicacionesTotal,
+      activas: publicacionesActivas,
+      inactivas: publicacionesInactivas,
+      destacadas: publicacionesDestacadas,
+      porTipo: arrayAObjeto(publicacionesPorTipo),
+    },
+    consultas: {
+      total: consultasTotal,
+      pendientes: consultasPendientes,
+      leidas: consultasLeidas,
+      respondidas: consultasRespondidas,
+    },
+    promociones: {
+      vigentes: promocionesVigentes,
+      vencidas: promocionesVencidas,
+    },
+    categorias: {
+      total: categoriasTotal,
+      activas: categoriasActivas,
+    },
+  });
+};
+
+module.exports = { getDashboard };
+</file>
+
+<file path="controllers/promocionController.js">
+const Promocion = require('../models/Promocion');
+const Publicacion = require('../models/Publicacion');
+
+const CAMPOS_ACTUALIZABLES = [
+  'titulo', 'descripcion', 'tipo', 'descuentoPorcentaje',
+  'publicacionId', 'fechaInicio', 'fechaFin', 'imagen', 'activo'
+];
+
+// Chequeo de fechas a mano, además del validador del schema.
+// Hace falta acá porque findByIdAndUpdate/save con $set no siempre dispara el validador
+// del schema con el "this" correcto cuando solo se manda una de las dos fechas.
+const validarFechas = (fechaInicio, fechaFin) => {
+  if (fechaInicio && fechaFin && new Date(fechaFin) <= new Date(fechaInicio)) {
+    return 'La fecha de fin tiene que ser posterior a la fecha de inicio';
+  }
+  return null;
+};
+
+// @desc    Listar promociones y novedades vigentes
+// @route   GET /api/promociones
+// @access  Público
+const getPromociones = async (req, res) => {
+  const ahora = new Date();
+  const filtro = {
+    activo: true,
+    fechaInicio: { $lte: ahora },
+    fechaFin: { $gte: ahora }
+  };
+
+  if (typeof req.query.tipo === 'string' && req.query.tipo) filtro.tipo = req.query.tipo;
+
+  const promociones = await Promocion.find(filtro)
+    .populate('publicacionId', 'nombre')
+    .sort({ fechaInicio: -1 });
+
+  res.json(promociones);
+};
+
+// @desc    Ver una promoción vigente por id
+// @route   GET /api/promociones/:id
+// @access  Público
+const getPromocionById = async (req, res) => {
+  const promocion = await Promocion.findById(req.params.id).populate('publicacionId', 'nombre');
+
+  const ahora = new Date();
+  const vigente = promocion && promocion.activo &&
+    promocion.fechaInicio <= ahora && promocion.fechaFin >= ahora;
+
+  if (!vigente) {
+    res.status(404);
+    throw new Error('Promoción no encontrada');
+  }
+
+  res.json(promocion);
+};
+
+// @desc    Listar TODAS las promociones (vigentes, vencidas, activas o no)
+// @route   GET /api/promociones/admin/todas
+// @access  Privado/Admin
+const getPromocionesAdmin = async (req, res) => {
+  const filtro = {};
+  if (typeof req.query.tipo === 'string' && req.query.tipo) filtro.tipo = req.query.tipo;
+  if (req.query.activo === 'true') filtro.activo = true;
+  if (req.query.activo === 'false') filtro.activo = false;
+
+  const promociones = await Promocion.find(filtro)
+    .populate('publicacionId', 'nombre')
+    .sort({ fechaInicio: -1 });
+
+  res.json(promociones);
+};
+
+// @desc    Crear una promoción o novedad
+// @route   POST /api/promociones
+// @access  Privado/Admin
+const crearPromocion = async (req, res) => {
+  if (req.body.publicacionId) {
+    const publicacion = await Publicacion.findById(req.body.publicacionId);
+    if (!publicacion) {
+      res.status(400);
+      throw new Error('La publicación indicada no existe');
+    }
+  }
+
+  const errorFechas = validarFechas(req.body.fechaInicio, req.body.fechaFin);
+  if (errorFechas) {
+    res.status(400);
+    throw new Error(errorFechas);
+  }
+
+  const datos = {};
+  CAMPOS_ACTUALIZABLES.forEach((campo) => {
+    if (req.body[campo] !== undefined) datos[campo] = req.body[campo];
+  });
+
+  const promocion = await Promocion.create(datos);
+  res.status(201).json(promocion);
+};
+
+// @desc    Modificar una promoción o novedad
+// @route   PUT /api/promociones/:id
+// @access  Privado/Admin
+const actualizarPromocion = async (req, res) => {
+  const promocion = await Promocion.findById(req.params.id);
+
+  if (!promocion) {
+    res.status(404);
+    throw new Error('Promoción no encontrada');
+  }
+
+  if (req.body.publicacionId) {
+    const publicacion = await Publicacion.findById(req.body.publicacionId);
+    if (!publicacion) {
+      res.status(400);
+      throw new Error('La publicación indicada no existe');
+    }
+  }
+
+  // Para validar fechas en un update parcial, tomamos la que venga nueva o, si no vino, la que ya tenía
+  const fechaInicio = req.body.fechaInicio ?? promocion.fechaInicio;
+  const fechaFin = req.body.fechaFin ?? promocion.fechaFin;
+  const errorFechas = validarFechas(fechaInicio, fechaFin);
+  if (errorFechas) {
+    res.status(400);
+    throw new Error(errorFechas);
+  }
+
+  CAMPOS_ACTUALIZABLES.forEach((campo) => {
+    if (req.body[campo] !== undefined) promocion[campo] = req.body[campo];
+  });
+
+  const promocionActualizada = await promocion.save();
+  res.json(promocionActualizada);
+};
+
+// @desc    Eliminar una promoción o novedad
+// @route   DELETE /api/promociones/:id
+// @access  Privado/Admin
+const eliminarPromocion = async (req, res) => {
+  const promocion = await Promocion.findById(req.params.id);
+
+  if (!promocion) {
+    res.status(404);
+    throw new Error('Promoción no encontrada');
+  }
+
+  await promocion.deleteOne();
+  res.json({ message: 'Promoción eliminada' });
+};
+
+module.exports = {
+  getPromociones,
+  getPromocionById,
+  getPromocionesAdmin,
+  crearPromocion,
+  actualizarPromocion,
+  eliminarPromocion
+};
+</file>
+
 <file path="controllers/publicacionController.js">
 const Publicacion = require('../models/Publicacion');
 const Categoria = require('../models/Categoria');
@@ -606,14 +926,21 @@ const CAMPOS_ACTUALIZABLES = [
   'precio', 'unidadPrecio', 'imagenes', 'estado', 'destacado', 'activo'
 ];
 
+const ORDENES_VALIDOS = {
+  recientes: { createdAt: -1 },
+  precio_asc: { precio: 1 },
+  precio_desc: { precio: -1 },
+};
+
 const escaparRegex = (texto) => texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const armarFiltro = (query) => {
-  const { categoriaId, tipo, q } = query;
+  const { categoriaId, tipo, q, destacado, precioMin, precioMax, disponible } = query;
   const filtro = {};
 
   if (typeof categoriaId === 'string' && categoriaId) filtro.categoriaId = categoriaId;
   if (typeof tipo === 'string' && tipo) filtro.tipo = tipo;
+
   if (typeof q === 'string' && q.trim()) {
     const texto = escaparRegex(q.trim().slice(0, 100));
     filtro.$or = [
@@ -622,15 +949,39 @@ const armarFiltro = (query) => {
     ];
   }
 
+  // ?destacado=true / ?destacado=false
+  if (destacado === 'true') filtro.destacado = true;
+  if (destacado === 'false') filtro.destacado = false;
+
+  // ?disponible=true / ?disponible=false (mapea al campo "estado" del modelo)
+  if (disponible === 'true') filtro.estado = 'disponible';
+  if (disponible === 'false') filtro.estado = 'no_disponible';
+
+  // ?precioMin=1000&precioMax=5000 (los dos son opcionales e independientes entre sí)
+  const rangoPrecio = {};
+  if (typeof precioMin === 'string' && precioMin.trim() !== '') {
+    const min = Number(precioMin);
+    if (!Number.isNaN(min) && min >= 0) rangoPrecio.$gte = min;
+  }
+  if (typeof precioMax === 'string' && precioMax.trim() !== '') {
+    const max = Number(precioMax);
+    if (!Number.isNaN(max) && max >= 0) rangoPrecio.$lte = max;
+  }
+  if (Object.keys(rangoPrecio).length > 0) filtro.precio = rangoPrecio;
+
   return filtro;
 };
+
+// ?orden=recientes (default) | precio_asc | precio_desc
+// Un valor desconocido o ausente cae siempre en "recientes", nunca rompe la consulta.
+const armarOrden = (query) => ORDENES_VALIDOS[query.orden] || ORDENES_VALIDOS.recientes;
 
 const getPublicaciones = async (req, res) => {
   const filtro = { ...armarFiltro(req.query), activo: true };
 
   const publicaciones = await Publicacion.find(filtro)
     .populate('categoriaId', 'nombre')
-    .sort({ createdAt: -1 });
+    .sort(armarOrden(req.query));
 
   res.json(publicaciones);
 };
@@ -642,7 +993,7 @@ const getPublicacionesAdmin = async (req, res) => {
 
   const publicaciones = await Publicacion.find(filtro)
     .populate('categoriaId', 'nombre')
-    .sort({ createdAt: -1 });
+    .sort(armarOrden(req.query));
 
   res.json(publicaciones);
 };
@@ -750,6 +1101,16 @@ const protect = async (req, res, next) => {
     throw new Error('No autorizado: el usuario ya no existe');
   }
 
+  // 4. El token no puede ser de antes del último cambio de contraseña
+  // (decoded.iat = momento en que se firmó el token, en segundos)
+  if (usuario.passwordCambiadaEn) {
+    const passwordCambiadaEnSegundos = Math.floor(usuario.passwordCambiadaEn.getTime() / 1000);
+    if (decoded.iat < passwordCambiadaEnSegundos) {
+      res.status(401);
+      throw new Error('La sesión expiró porque la contraseña cambió. Iniciá sesión de nuevo.');
+    }
+  }
+
   // Dejamos los datos a mano para los controllers que vienen después
   req.usuario = usuario;
   req.token = token;
@@ -809,10 +1170,27 @@ const errorHandler = (err, req, res, next) => {
     message = Object.values(err.errors).map((val) => val.message).join('. ');
   }
 
+  // Siempre queda registrado en la consola del servidor, aunque al cliente le mandemos un mensaje genérico.
+  // Así el admin/desarrollador puede ver el detalle real sin exponerlo afuera.
+  if (statusCode >= 500) {
+    console.error(err);
+  }
+
+  // Un 500 significa que fue un error no esperado (bug, caída de la base, etc.).
+  // No mandamos err.message al cliente porque puede filtrar detalles internos
+  // (rutas de archivos, mensajes de MongoDB, nombres de variables, etc.).
+  if (statusCode >= 500) {
+    message = 'Ocurrió un error interno del servidor';
+  }
+
+  // El stack solo se manda si estamos EXPLÍCITAMENTE en desarrollo.
+  // (antes se ocultaba solo si NODE_ENV === 'production'; si esa variable no estaba
+  // seteada en el .env, el stack se filtraba igual. Así queda seguro por defecto.)
+  const mostrarStack = process.env.NODE_ENV === 'development';
+
   res.status(statusCode).json({
     message,
-
-    stack: process.env.NODE_ENV === 'production' ? undefined : err.stack,
+    ...(mostrarStack && { stack: err.stack }),
   });
 };
 
@@ -837,13 +1215,27 @@ module.exports = mongoose.model('Categoria', categoriaSchema);
 <file path="models/ComercioInfo.js">
 const mongoose = require('mongoose');
 
+const REGEX_EMAIL = /^\S+@\S+\.\S+$/;
+const REGEX_TELEFONO = /^\+?[\d\s()-]{8,20}$/;
+
 const comercioInfoSchema = new mongoose.Schema({
     adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'Usuario', required: true },
     nombre: { type: String, required: true, default: 'Aloha Surf Shop' },
     descripcion: { type: String, required: true },
     direccion: { type: String, required: true },
-    telefono: { type: String, required: true },
-    email: { type: String, required: true },
+    telefono: {
+      type: String,
+      required: true,
+      trim: true,
+      match: [REGEX_TELEFONO, 'El teléfono no es válido (entre 8 y 20 caracteres: números, +, espacios, guiones o paréntesis)']
+    },
+    email: {
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true,
+      match: [REGEX_EMAIL, 'El email no tiene un formato válido']
+    },
     horarios: { type: String, required: true }, // texto libre, ej. "Lunes a viernes de 9 a 18hs"
     redesSociales: {
     instagram: { type: String, default: '' },
@@ -861,27 +1253,129 @@ module.exports = mongoose.model('ComercioInfo', comercioInfoSchema, 'comercio');
 <file path="models/Consulta.js">
 const mongoose = require('mongoose');
 
+const REGEX_EMAIL = /^\S+@\S+\.\S+$/;
+const REGEX_TELEFONO = /^\+?[\d\s()-]{8,20}$/;
+
 const consultaSchema = new mongoose.Schema({
   publicacionId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Publicacion',
     required: false // null = consulta general "Contacto"; con valor = consulta sobre esa publicación
   },
-  nombre: { type: String, required: true, trim: true },
-  email: { type: String, required: true, trim: true },
-  telefono: { type: String, trim: true },
-  asunto: { type: String, required: true, trim: true },
-  mensaje: { type: String, required: true },
-  estado: { 
-    type: String, 
-    enum: ['pendiente', 'leida', 'respondida'], 
-    default: 'pendiente' 
+  nombre: {
+    type: String,
+    required: true,
+    trim: true,
+    maxlength: [100, 'El nombre no puede superar los 100 caracteres']
+  },
+  email: {
+    type: String,
+    required: true,
+    trim: true,
+    lowercase: true,
+    maxlength: [100, 'El email no puede superar los 100 caracteres'],
+    match: [REGEX_EMAIL, 'El email no tiene un formato válido']
+  },
+  telefono: {
+    type: String,
+    trim: true,
+    maxlength: [20, 'El teléfono no puede superar los 20 caracteres'],
+    validate: {
+      // Es opcional: solo se valida el formato si vino un valor
+      validator: (v) => !v || REGEX_TELEFONO.test(v),
+      message: 'El teléfono no es válido (entre 8 y 20 caracteres: números, +, espacios, guiones o paréntesis)'
+    }
+  },
+  asunto: {
+    type: String,
+    required: true,
+    trim: true,
+    maxlength: [100, 'El asunto no puede superar los 100 caracteres']
+  },
+  mensaje: {
+    type: String,
+    required: true,
+    trim: true,
+    maxlength: [1000, 'El mensaje no puede superar los 1000 caracteres']
+  },
+  estado: {
+    type: String,
+    enum: ['pendiente', 'leida', 'respondida'],
+    default: 'pendiente'
   }
 }, {
   timestamps: true
 });
 
 module.exports = mongoose.model('Consulta', consultaSchema);
+</file>
+
+<file path="models/Promocion.js">
+const mongoose = require('mongoose');
+
+const TIPOS_PROMOCION = ['promocion', 'novedad'];
+const REGEX_URL = /^https?:\/\/.+/i;
+
+const promocionSchema = new mongoose.Schema({
+  titulo: {
+    type: String,
+    required: true,
+    trim: true,
+    maxlength: [100, 'El título no puede superar los 100 caracteres']
+  },
+  descripcion: {
+    type: String,
+    required: true,
+    trim: true,
+    maxlength: [500, 'La descripción no puede superar los 500 caracteres']
+  },
+  tipo: {
+    type: String,
+    enum: TIPOS_PROMOCION,
+    required: true
+  },
+  // Solo tiene sentido cuando tipo = "promocion" (una "novedad" es solo un anuncio, sin descuento)
+  descuentoPorcentaje: {
+    type: Number,
+    min: [0, 'El descuento no puede ser negativo'],
+    max: [100, 'El descuento no puede superar el 100%']
+  },
+  // Opcional: a qué publicación puntual aplica. Si no se manda, se entiende que es general (todo el local).
+  publicacionId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Publicacion',
+    required: false
+  },
+  fechaInicio: {
+    type: Date,
+    required: true
+  },
+  fechaFin: {
+    type: Date,
+    required: true,
+    validate: {
+      // "this" acá es el documento que se está creando/guardando (no funciona con findByIdAndUpdate,
+      // por eso en el controller lo vamos a validar también a mano antes de actualizar)
+      validator: function (v) {
+        return !this.fechaInicio || v > this.fechaInicio;
+      },
+      message: 'La fecha de fin tiene que ser posterior a la fecha de inicio'
+    }
+  },
+  imagen: {
+    type: String,
+    trim: true,
+    match: [REGEX_URL, 'La imagen debe ser una URL válida (http:// o https://)']
+  },
+  activo: {
+    type: Boolean,
+    default: true
+  }
+}, {
+  timestamps: true
+});
+
+module.exports = mongoose.model('Promocion', promocionSchema);
 </file>
 
 <file path="models/Publicacion.js">
@@ -891,6 +1385,7 @@ const TIPOS_PUBLICACION = ['alquiler_tabla', 'alquiler_ropa', 'alquiler_equipo',
 const NIVELES = ['principiante', 'intermedio', 'profesional'];
 const UNIDADES_PRECIO = ['dia', 'clase', 'unidad'];
 const ESTADOS = ['disponible', 'no_disponible'];
+const REGEX_URL = /^https?:\/\/.+/i;
 
 const publicacionSchema = new mongoose.Schema({
   nombre: { type: String, required: true, trim: true },
@@ -911,10 +1406,19 @@ const publicacionSchema = new mongoose.Schema({
       'nivel es obligatorio cuando tipo = "clase"'
     ]
   },
-  precio: { type: Number, default: 0 },
+  precio: {
+    type: Number,
+    default: 0,
+    min: [0, 'El precio no puede ser negativo']
+  },
   unidadPrecio: { type: String, enum: UNIDADES_PRECIO, default: 'unidad' },
   imagenes: {
-    type: [{ type: String, required: true }],
+    type: [{
+      type: String,
+      required: true,
+      trim: true,
+      match: [REGEX_URL, 'Cada imagen debe ser una URL válida (http:// o https://)']
+    }],
     validate: {
       validator: (arr) => arr.length > 0,
       message: 'La publicación necesita al menos una imagen'
@@ -1038,6 +1542,18 @@ router
 module.exports = router;
 </file>
 
+<file path="routes/comercioRoutes.js">
+const express = require('express');
+const router = express.Router();
+const { getComercio, actualizarComercio } = require('../controllers/comercioController');
+const { protect, soloAdmin } = require('../middleware/authMiddleware');
+
+// Ver la info del comercio es público (la usa el sitio). Crear/editar: solo el administrador.
+router.route('/').get(getComercio).put(protect, soloAdmin, actualizarComercio);
+
+module.exports = router;
+</file>
+
 <file path="routes/ConsultaRoutes.js">
 const express = require('express');
 const router = express.Router();
@@ -1059,6 +1575,45 @@ router
   .delete(protect, soloAdmin, eliminarConsulta);
 
 router.route('/:id/estado').patch(protect, soloAdmin, actualizarEstadoConsulta);
+
+module.exports = router;
+</file>
+
+<file path="routes/dashboardRoutes.js">
+const express = require('express');
+const router = express.Router();
+const { getDashboard } = require('../controllers/dashboardController');
+const { protect, soloAdmin } = require('../middleware/authMiddleware');
+
+// Todo el dashboard es privado: solo lo ve el administrador logueado
+router.get('/', protect, soloAdmin, getDashboard);
+
+module.exports = router;
+</file>
+
+<file path="routes/promocionRoutes.js">
+const express = require('express');
+const router = express.Router();
+const {
+  getPromociones,
+  getPromocionesAdmin,
+  getPromocionById,
+  crearPromocion,
+  actualizarPromocion,
+  eliminarPromocion
+} = require('../controllers/promocionController');
+const { protect, soloAdmin } = require('../middleware/authMiddleware');
+
+router.route('/').get(getPromociones).post(protect, soloAdmin, crearPromocion);
+
+// Tiene que ir ANTES de "/:id", si no Express interpreta "admin" como si fuera un id
+router.get('/admin/todas', protect, soloAdmin, getPromocionesAdmin);
+
+router
+  .route('/:id')
+  .get(getPromocionById)
+  .put(protect, soloAdmin, actualizarPromocion)
+  .delete(protect, soloAdmin, eliminarPromocion);
 
 module.exports = router;
 </file>
@@ -1250,11 +1805,15 @@ require('./models/Consulta');
 require('./models/ComercioInfo');
 require('./models/ResetToken');
 require('./models/TokenInvalidado');
+require('./models/Promocion');
 
 const categoriaRoutes = require('./routes/categoriaRoutes');
 const consultaRoutes = require('./routes/ConsultaRoutes');
 const publicacionRoutes = require('./routes/publicacionRoutes');
 const authRoutes = require('./routes/authRoutes');
+const comercioRoutes = require('./routes/comercioRoutes');
+const promocionRoutes = require('./routes/promocionRoutes');
+const dashboardRoutes = require('./routes/dashboardRoutes');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 
 // 1. Inicializar la app de Express
@@ -1277,6 +1836,10 @@ app.use('/api/categorias', categoriaRoutes);
 app.use('/api/consultas', consultaRoutes);
 app.use('/api/publicaciones', publicacionRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/comercio', comercioRoutes);
+app.use('/api/promociones', promocionRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+
 // 6. Middlewares de error (siempre al final, después de todas las rutas)
 app.use(notFound);
 app.use(errorHandler);
