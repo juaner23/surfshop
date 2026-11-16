@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const TIPOS_PUBLICACION = ['alquiler_tabla', 'alquiler_ropa', 'alquiler_equipo', 'clase', 'merch'];
 const NIVELES = ['principiante', 'intermedio', 'profesional'];
-const UNIDADES_PRECIO = ['dia', 'clase', 'unidad'];
+const UNIDADES_PRECIO = ['dia', 'hora', 'clase', 'unidad'];
 const ESTADOS = ['disponible', 'no_disponible'];
 const REGEX_URL = /^https?:\/\/.+/i;
 

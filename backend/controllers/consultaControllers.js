@@ -4,13 +4,14 @@ const Consulta = require('../models/Consulta');
 // @route   POST /api/consultas
 // @access  Público
 const crearConsulta = async (req, res) => {
-  const { publicacionId, nombre, email, telefono, asunto, mensaje } = req.body;
+  const { publicacionId, nombre, email, telefono, disponibilidad, asunto, mensaje } = req.body;
 
   const consulta = await Consulta.create({
     publicacionId,
     nombre,
     email,
     telefono,
+    disponibilidad,
     asunto,
     mensaje,
   });

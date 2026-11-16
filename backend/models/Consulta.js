@@ -33,6 +33,11 @@ const consultaSchema = new mongoose.Schema({
       message: 'El teléfono no es válido (entre 8 y 20 caracteres: números, +, espacios, guiones o paréntesis)'
     }
   },
+    disponibilidad: {
+    type: String,
+    trim: true,
+    maxlength: [100, 'La disponibilidad no puede superar los 100 caracteres']
+  },
   asunto: {
     type: String,
     required: true,
