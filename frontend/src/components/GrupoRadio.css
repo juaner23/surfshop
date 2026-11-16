@@ -1,0 +1,64 @@
+.radios {
+  border: 0;
+  padding: 0;
+  margin: 0 0 1.25rem;
+  min-width: 0;
+}
+
+.radios__legend {
+  padding: 0;
+  margin-bottom: 0.6rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-dark);
+}
+
+.radios__lista {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+
+.radios__opcion {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  background: #fff;
+  color: var(--color-text-dark);
+  border: 1px solid rgba(30, 70, 70, 0.3);
+  border-radius: 3px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.radios__opcion input {
+  margin: 0;
+  accent-color: var(--color-text-dark);
+}
+
+.radios__opcion:hover {
+  border-color: var(--color-text-dark);
+}
+
+.radios__opcion--activa {
+  background: #e4ebe2;
+  border-color: var(--color-text-dark);
+  font-weight: 600;
+}
+
+.radios__opcion:focus-within {
+  outline: 3px solid rgba(240, 106, 86, 0.6);
+  outline-offset: 2px;
+}
+
+.radios--error .radios__opcion {
+  border-color: #b3261e;
+}
+
+.radios__error {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: #b3261e;
+}

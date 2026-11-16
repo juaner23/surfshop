@@ -1,0 +1,59 @@
+.campo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1.25rem;
+}
+
+.campo__label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-dark);
+}
+
+.campo__opcional {
+  font-weight: 400;
+  opacity: 0.65;
+}
+
+.campo__control {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.8rem 1rem;
+  font-family: inherit;
+  font-size: 1rem;
+  color: var(--color-text-dark);
+  background: #fff;
+  border: 1px solid rgba(30, 70, 70, 0.3);
+  border-radius: 3px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+textarea.campo__control {
+  min-height: 160px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.campo__control:focus {
+  outline: none;
+  border-color: var(--color-text-dark);
+  box-shadow: 0 0 0 3px rgba(240, 106, 86, 0.35);
+}
+
+.campo--error .campo__control {
+  border-color: #b3261e;
+}
+
+.campo__error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #b3261e;
+}
+
+.campo__ayuda {
+  margin: 0;
+  font-size: 0.75rem;
+  opacity: 0.65;
+  text-align: right;
+}

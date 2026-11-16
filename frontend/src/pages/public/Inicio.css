@@ -9,6 +9,7 @@
   background-color: var(--color-bg-light);
 }
 
+/* ---------- Hero ---------- */
 .hero-section {
   position: relative;
   min-height: 100vh;
@@ -43,7 +44,7 @@
   margin: 0;
   font-weight: 400;
   color: white;
-  text-shadow: 2px 2px 10px rgba(0,0,0,0.25);
+  text-shadow: 2px 2px 10px rgba(0, 0, 0, 0.25);
 }
 
 .hero-text {
@@ -72,7 +73,7 @@
   border-radius: 4px;
   font-weight: bold;
   font-size: 1rem;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
   transition: transform 0.3s ease;
   font-family: inherit;
 }
@@ -88,14 +89,14 @@
   border-radius: 4px;
   font-weight: bold;
   font-size: 1rem;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
   transition: transform 0.3s ease, background-color 0.3s ease;
   font-family: inherit;
 }
 .btn-primary:hover { background-color: #d95a48; transform: translateY(-3px); }
 
 .hero-bottom-text {
-  margin-top: 5rem; 
+  margin-top: 5rem;
   text-align: center;
   font-size: 0.75rem;
   font-weight: 700;
@@ -104,8 +105,9 @@
   text-transform: uppercase;
 }
 
+/* ---------- Destacados (carrusel) ---------- */
 .destacados-section {
-  padding: 6rem 4rem;
+  padding: 4rem 4rem;
   max-width: 1400px;
   margin: 0 auto;
 }
@@ -121,38 +123,38 @@
 .section-subtitle {
   color: var(--color-text-dark);
   opacity: 0.7;
-  margin-bottom: 4.5rem;
+  margin-bottom: 2.5rem;
   font-size: 1rem;
 }
 
 .destacados-grid {
   display: flex;
-  gap: 3rem;
+  gap: 1.5rem;
   overflow-x: auto;
   scroll-snap-type: x mandatory;
-  padding-bottom: 2.5rem;
+  padding-bottom: 1.5rem;
 }
 
 .destacados-grid::-webkit-scrollbar { height: 8px; }
-.destacados-grid::-webkit-scrollbar-thumb { background: rgba(30,70,70,0.25); border-radius: 4px; }
-.destacados-grid::-webkit-scrollbar-track { background: rgba(0,0,0,0.05); }
+.destacados-grid::-webkit-scrollbar-thumb { background: rgba(30, 70, 70, 0.25); border-radius: 4px; }
+.destacados-grid::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.05); }
 
 .card-destacado {
-  min-width: 290px;
-  flex: 0 0 auto;
+  flex: 0 0 260px;
   scroll-snap-align: start;
 }
 
-.card-image-wrapper img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }
-.card-info { margin-top: 1.5rem; color: var(--color-text-dark); }
-.card-category { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.6; font-weight: 600;}
-.card-name { font-size: 1.25rem; margin: 0.6rem 0; font-weight: 600; }
-.card-price { font-size: 1.05rem; color: var(--color-text-dark); opacity: 0.8; }
+.card-image-wrapper img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }
+.card-info { margin-top: 1rem; color: var(--color-text-dark); }
+.card-category { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.6; font-weight: 600; }
+.card-name { font-size: 1.05rem; margin: 0.4rem 0; font-weight: 600; }
+.card-price { font-size: 0.95rem; color: var(--color-text-dark); opacity: 0.8; }
 
-.destacados-footer { display: flex; justify-content: flex-end; margin-top: 3.5rem; }
+.destacados-footer { display: flex; justify-content: flex-end; margin-top: 1.5rem; }
 .link-todos { color: var(--color-text-dark); text-decoration: none; font-weight: 700; font-size: 1rem; transition: color 0.3s; }
 .link-todos:hover { color: var(--color-primary); }
 
+/* ---------- Sobre nosotros ---------- */
 .sobre-nosotros-wrapper {
   padding: 0 4rem 6rem 4rem;
   max-width: 1400px;
@@ -168,7 +170,7 @@
   overflow: hidden;
 }
 
- .sobre-nosotros-image {
+.sobre-nosotros-image {
   flex: 1;
   background-image: url('https://images.unsplash.com/photo-1595187768560-63ce73f27116');
   background-size: cover;
@@ -189,28 +191,24 @@
 .sobre-nosotros-content p { margin-bottom: 1.5rem; line-height: 1.8; font-size: 1.05rem; opacity: 0.95; }
 .firma-aloha { margin-top: 2.5rem; font-size: 0.95rem; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 600; }
 
+/* ---------- Celular ---------- */
 @media (max-width: 768px) {
   .hero-section { min-height: 100vh; padding-top: 80px; }
   .hero-title { font-size: 3.8rem; }
   .hero-text { font-size: 1rem; }
   .hero-overlay { padding: 1.5rem; }
-  
-  .destacados-section { padding: 4rem 1.5rem; }
+
+  .destacados-section { padding: 3rem 1.5rem; }
   .section-title { font-size: 2.8rem; }
-  
-  .destacados-grid {
-    flex-direction: column;
-    gap: 2rem;
-    overflow-x: hidden;
-  }
-  .card-destacado { min-width: 100%; }
-  
+  .destacados-grid { gap: 1rem; }
+  .card-destacado { flex: 0 0 200px; }
+
   .sobre-nosotros-wrapper { padding: 0 1.5rem 4rem 1.5rem; }
   .sobre-nosotros-section { flex-direction: column; }
-  
+
   /* Oculta la imagen en celular para dejar solo el fondo coral */
   .sobre-nosotros-image { display: none; }
-  
+
   .sobre-nosotros-content { padding: 4rem 2rem; }
   .sobre-nosotros-content h2 { font-size: 3.2rem; }
 }

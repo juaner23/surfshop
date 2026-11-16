@@ -127,3 +127,24 @@ body, html {
   .footer-nav { justify-content: center; }
   .social-links a, .footer-nav a { margin: 0.5rem; }
 }
+
+/* ===== Variables globales (compartidas por todas las páginas) ===== */
+:root {
+  --color-primary: #F06A56;
+  --color-primary-dark: #d95a48;
+  --color-text-dark: #1E4646;
+  --color-bg-light: #F7F5F0;
+  --font-title: 'Pacifico', cursive;
+}
+
+/* ===== Navbar: link activo y variante sólida (páginas sin hero) ===== */
+.nav-links a.active {
+  text-decoration: underline;
+  text-underline-offset: 6px;
+  text-decoration-thickness: 2px;
+}
+
+.navbar-public--solid {
+  position: relative;
+  background: var(--color-bg-light);
+}
